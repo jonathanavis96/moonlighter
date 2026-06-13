@@ -50,7 +50,7 @@ checklist of bigger things it **proposes** — tick what you want, and it does e
 > or just let your AI agent set it up for you (below).
 
 ```bash
-git clone https://github.com/<you>/moonlighter.git
+git clone https://github.com/jonathanavis96/moonlighter.git
 cd moonlighter
 ./moonlight ui          # starts the control panel
 ```
@@ -67,7 +67,7 @@ idle windows. Watch a run live, read the morning report, and approve or undo fro
 This repo ships with a setup playbook for AI agents. In **Claude Code**, just point it here:
 
 ```
-Set up Moonlighter for me from https://github.com/<you>/moonlighter — follow its CLAUDE.md.
+Set up Moonlighter for me from https://github.com/jonathanavis96/moonlighter — follow its CLAUDE.md.
 ```
 
 The agent reads [`CLAUDE.md`](CLAUDE.md), detects your OS, installs what's missing (including
