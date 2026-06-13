@@ -8,6 +8,21 @@ Moonlighter runs Claude Code autonomously in the hours you're *not* using it —
 auditing, and improving your machine while you sleep — using only the subscription capacity
 you'd otherwise waste, and leaving a morning report of everything it did and everything it suggests.
 
+<p>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/github/license/jonathanavis96/moonlighter?style=flat-square&color=d4b478"></a>
+  <img alt="Python 3.9+" src="https://img.shields.io/badge/python-3.9%2B-d4b478?style=flat-square&logo=python&logoColor=white">
+  <img alt="Platform: Linux · macOS · WSL2" src="https://img.shields.io/badge/platform-Linux%20%C2%B7%20macOS%20%C2%B7%20WSL2-3b4252?style=flat-square">
+  <a href="CLAUDE.md"><img alt="Built for Claude Code" src="https://img.shields.io/badge/built%20for-Claude%20Code-8a6fe6?style=flat-square"></a>
+  <img alt="Dependencies: stdlib + PyYAML" src="https://img.shields.io/badge/deps-stdlib%20%2B%20PyYAML-3b4252?style=flat-square">
+  <a href="https://github.com/jonathanavis96/moonlighter/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/jonathanavis96/moonlighter?style=flat-square&color=d4b478"></a>
+</p>
+
+</div>
+
+<div align="center">
+
+[Why](#why) · [Safe by design](#safe-by-design) · [Quick start](#quick-start) · [Platform support](#platform-support) · [How it works](#how-it-works) · [Configuration](#configuration) · [CLI](#cli)
+
 </div>
 
 ---
