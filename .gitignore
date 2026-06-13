@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+# runtime state + user config live OUTSIDE the repo (~/.moonlighter), never commit them
+config.local.yaml
+*.log
+.DS_Store

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Moonlighter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;1,9..144,300&family=Archivo+Black&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#070a12; --ink2:#0b101d; --line:rgba(214,225,255,.09);
+  --moon:#eee9dd; --gold:#dcbe85; --blue:#9db5e2; --dim:#94a0b8;
+  --ok:#a8d49a; --fail:#e8866c; --hold:#dcbe85;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:
+    radial-gradient(1100px 600px at 75% -10%, #131a2e 0%, transparent 60%),
+    radial-gradient(800px 500px at -10% 110%, #10131f 0%, transparent 55%),
+    var(--ink);
+  color:var(--moon);
+  font-family:'IBM Plex Mono',monospace; font-weight:400; font-size:14px;
+  min-height:100vh; letter-spacing:.01em;
+}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.5;
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, #fff8 50%, transparent 51%),
+    radial-gradient(1px 1px at 28% 64%, #fff5 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 41% 12%, #fff7 50%, transparent 51%),
+    radial-gradient(1px 1px at 57% 38%, #fff4 50%, transparent 51%),
+    radial-gradient(1px 1px at 66% 81%, #fff6 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 78% 18%, #fff8 50%, transparent 51%),
+    radial-gradient(1px 1px at 87% 56%, #fff5 50%, transparent 51%),
+    radial-gradient(1px 1px at 94% 30%, #fff7 50%, transparent 51%),
+    radial-gradient(1px 1px at 8% 88%, #fff5 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 48% 92%, #fff6 50%, transparent 51%);
+}
+.wrap{max-width:1080px;margin:0 auto;padding:44px 40px 90px;position:relative}
+header{display:flex;align-items:flex-end;justify-content:space-between;
+  border-bottom:1px solid var(--line);padding-bottom:26px;margin-bottom:40px}
+.brand{display:flex;align-items:center;gap:18px}
+.crescent{width:42px;height:42px;border-radius:50%;flex:none;
+  background:radial-gradient(circle at 62% 38%, transparent 58%, var(--gold) 60%);
+  box-shadow:0 0 28px rgba(212,180,120,.25)}
+h1{font-family:'Fraunces',serif;font-weight:300;font-size:32px;letter-spacing:.04em}
+h1 em{font-style:italic;color:var(--gold)}
+.mode{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.28em;text-align:right;line-height:1.9}
+.mode b{color:var(--blue);font-weight:400}
+.label{font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:var(--dim);margin-bottom:16px}
+/* ---------- hero ---------- */
+.hero{display:grid;grid-template-columns:1fr 1fr 1.45fr;gap:34px;align-items:stretch}
+.stat .huge{font-family:'Archivo Black',sans-serif;font-weight:400;letter-spacing:-.01em;line-height:.85;
+  font-size:clamp(68px,8vw,96px);font-variant-numeric:lining-nums tabular-nums}
+.stat .huge small{font-size:.32em;color:var(--dim);letter-spacing:0;margin-left:5px}
+.stat.win .huge{color:var(--moon)}
+.stat.week .huge{color:var(--gold)}
+.track{height:3px;background:rgba(214,225,255,.08);margin:22px 0 12px;position:relative}
+.track i{position:absolute;left:0;top:0;bottom:0;background:var(--fail)}
+.stat.week .track i{background:var(--gold)}
+.track u{position:absolute;top:-4px;width:1px;height:11px;background:var(--dim)}
+.resets{color:var(--dim);font-size:12.5px;line-height:1.8}
+.resets b{color:var(--moon);font-weight:400}
+.panel{border:1px solid var(--line);padding:24px 26px;background:rgba(11,16,29,.55)}
+.legend{display:flex;gap:18px;font-size:10.5px;color:var(--dim);letter-spacing:.12em;margin-top:12px;text-transform:uppercase;flex-wrap:wrap}
+.legend i{display:inline-block;width:18px;height:2px;margin-right:7px;vertical-align:middle}
+/* ---------- gate console ---------- */
+.console{margin-top:38px;border:1px solid var(--line);background:rgba(5,7,12,.7)}
+.console .bar{display:flex;justify-content:space-between;align-items:center;
+  padding:12px 20px;border-bottom:1px solid var(--line)}
+.console .bar .label{margin:0}
+.console .bar .next{font-size:11px;color:var(--dim)}
+.console .bar .next b{color:var(--moon);font-weight:400}
+.clog{padding:18px 22px;font-size:13px;line-height:2.05;color:#dbe1ee}
+.clog .t{color:#646f88;margin-right:14px}
+.clog .dots{color:#39425a}
+.clog .ok{color:var(--ok)} .clog .fail{color:var(--fail)} .clog .hold{color:var(--hold)}
+.clog .why{color:#a4afc6}
+.clog .val{color:var(--blue)}
+.summary{padding:14px 22px;border-top:1px solid var(--line);
+  font-family:'Fraunces',serif;font-style:italic;font-weight:300;font-size:17px;color:#e2e7f2}
+.summary b{color:var(--gold);font-weight:400;font-style:normal}
+/* ---------- actions ---------- */
+.actions{display:flex;gap:14px;align-items:center;margin:30px 0 52px;flex-wrap:wrap}
+.btn{font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+  padding:15px 28px;background:transparent;border:1px solid var(--gold);color:var(--gold);cursor:pointer;transition:all .25s}
+.btn:hover{background:rgba(212,180,120,.1)}
+.btn.primary{background:var(--gold);color:#14110a;font-weight:500}
+.btn.primary:hover{box-shadow:0 0 34px rgba(212,180,120,.35)}
+.btn.ghost{border-color:var(--line);color:var(--dim)}
+.btn.ghost:hover{border-color:var(--dim);color:var(--moon);background:transparent}
+.btn[disabled]{opacity:.32;cursor:not-allowed;pointer-events:none}
+.hours{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:12px}
+.hours .pill{border:1px solid var(--line);padding:6px 12px;color:var(--moon)}
+/* ---------- heatmap ---------- */
+.heat{display:grid;grid-template-columns:repeat(24,1fr);gap:3px;margin-top:4px}
+.heat div{aspect-ratio:1;border-radius:1px;background:rgba(143,168,216,.07)}
+.heat .a1{background:rgba(143,168,216,.22)} .heat .a2{background:rgba(143,168,216,.45)} .heat .a3{background:rgba(143,168,216,.8)}
+.heat .winh{outline:1px solid var(--gold);outline-offset:1px;background:rgba(212,180,120,.18)}
+.heatlbl{display:flex;justify-content:space-between;color:var(--dim);font-size:9px;letter-spacing:.15em;margin-top:8px}
+/* ---------- runs ---------- */
+.runs{margin-top:48px}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{font-size:10px;letter-spacing:.25em;text-transform:uppercase;color:var(--dim);font-weight:400;
+  text-align:left;padding:0 14px 14px;border-bottom:1px solid var(--line)}
+td{padding:16px 14px;border-bottom:1px solid var(--line);color:#d6dce8}
+td.date{font-family:'Fraunces',serif;font-style:italic;color:var(--moon);font-size:15px;white-space:nowrap}
+.tag{font-size:10px;letter-spacing:.14em;padding:4px 10px;border:1px solid var(--line);color:var(--dim);text-transform:uppercase;white-space:nowrap}
+.tag.clean{color:var(--ok);border-color:rgba(158,201,143,.35)}
+td .pct{color:var(--gold)}
+tr:hover td{background:rgba(143,168,216,.04)}
+footer{margin-top:60px;text-align:center;color:var(--dim);font-size:10px;letter-spacing:.3em;text-transform:uppercase}
+.mobilebar{display:none}
+/* ============ MOBILE ============ */
+@media (max-width:720px){
+  .wrap{padding:26px 20px 130px}
+  header{margin-bottom:30px;padding-bottom:20px}
+  h1{font-size:24px}
+  .crescent{width:32px;height:32px}
+  .mode{display:none}
+  .hero{grid-template-columns:1fr 1fr;gap:0 22px}
+  .stat .huge{font-size:clamp(64px,21vw,84px)}
+  .graphpanel{grid-column:1/-1;margin-top:26px}
+  .console{margin-top:28px}
+  .clog{padding:14px 16px;font-size:11.5px;line-height:2;overflow-x:auto;white-space:nowrap}
+  .summary{font-size:15px;padding:13px 16px}
+  .actions{display:none}                  /* desktop actions hidden... */
+  .mobilebar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:20;gap:10px;
+    padding:12px 14px calc(12px + env(safe-area-inset-bottom));
+    background:rgba(7,10,18,.92);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+  .mobilebar .btn.primary{flex:2.2;padding:17px 10px;font-size:13px;text-align:center}
+  .mobilebar .btn.ghost{flex:1;padding:17px 10px;text-align:center}
+  .heatwrap{overflow-x:auto;margin:0 -20px;padding:0 20px}
+  .heatwrap .heat{min-width:560px}
+  .runs table, .runs thead{display:block}
+  .runs thead{display:none}
+  .runs tr{display:block;border:1px solid var(--line);margin-bottom:14px;padding:14px 16px}
+  .runs td{display:block;border:none;padding:3px 0}
+  .runs td.date{font-size:17px;margin-bottom:4px}
+  .runs td:last-child{color:var(--gold);padding-top:8px}
+  footer{margin-top:36px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <div class="crescent"></div>
+      <h1>Moon<em>lighter</em></h1>
+    </div>
+    <div class="mode">Observe mode · night 0<br><b>next window&nbsp; 02:00 – 05:30</b></div>
+  </header>
+
+  <section class="hero">
+    <div class="stat win">
+      <div class="label">Five-hour window</div>
+      <div class="huge">71<small>%</small></div>
+      <div class="track"><i style="width:71%"></i><u style="left:20%"></u></div>
+      <p class="resets">resets in <b>3 h 14 m</b> · start threshold <b>20%</b></p>
+    </div>
+    <div class="stat week">
+      <div class="label">Weekly allowance</div>
+      <div class="huge">10<small>%</small></div>
+      <div class="track"><i style="width:10%"></i><u style="left:90%"></u></div>
+      <p class="resets">resets <b>Friday 06:00</b> · reserve <b>10%</b></p>
+    </div>
+    <div class="panel graphpanel">
+      <div class="label">The week ahead — planned spend</div>
+      <svg width="100%" height="150" viewBox="0 0 420 150" preserveAspectRatio="none">
+        <line x1="0" y1="22" x2="420" y2="22" stroke="rgba(212,180,120,.3)" stroke-dasharray="3 5"/>
+        <text x="4" y="15" fill="#d4b478" font-size="9" font-family="IBM Plex Mono" letter-spacing="2">90% TARGET</text>
+        <path d="M0,140 L60,128 L120,118 L180,112 L240,104 L300,98 L360,92 L420,88 L420,150 L0,150 Z" fill="rgba(143,168,216,.12)"/>
+        <path d="M0,140 L60,120 L120,104 L180,86 L240,68 L300,52 L360,38 L420,26" fill="none" stroke="#d4b478" stroke-width="1.6" stroke-dasharray="4 4"/>
+        <path d="M0,140 L40,136 L70,134" fill="none" stroke="#e8e2d4" stroke-width="2"/>
+        <circle cx="70" cy="134" r="3" fill="#e8e2d4"/>
+        <line x1="395" y1="0" x2="395" y2="150" stroke="rgba(214,225,255,.15)"/>
+        <text x="346" y="147" fill="#94a0b8" font-size="8.5" font-family="IBM Plex Mono">FRI 06:00</text>
+      </svg>
+      <div class="legend">
+        <span><i style="background:#e8e2d4"></i>so far</span>
+        <span><i style="background:rgba(143,168,216,.5)"></i>your forecast</span>
+        <span><i style="background:#d4b478"></i>with moonlighter</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="console">
+    <div class="bar">
+      <div class="label">Gate console — last check</div>
+      <div class="next">next check <b>14:30</b></div>
+    </div>
+    <div class="clog">
+      <div><span class="t">13:58:12</span>poll usage <span class="dots">............</span> <span class="ok">OK</span> <span class="why">( 5h <span class="val">71%</span> · weekly <span class="val">10%</span> )</span></div>
+      <div><span class="t">13:58:12</span>activity check <span class="dots">........</span> <span class="fail">FAIL</span> <span class="why">( you were active 41 m ago )</span></div>
+      <div><span class="t">13:58:12</span>window check <span class="dots">..........</span> <span class="fail">FAIL</span> <span class="why">( 71% &gt; 20% threshold )</span></div>
+      <div><span class="t">13:58:12</span>weekly budget <span class="dots">.........</span> <span class="ok">OK</span> <span class="why">( tonight ≈ <span class="val">6.2%</span> ≈ 440k tok )</span></div>
+      <div><span class="t">13:58:12</span>verdict <span class="dots">...............</span> <span class="hold">HOLD</span></div>
+    </div>
+    <div class="summary">Holding — your window is hot and you're still around. Tonight at <b>02:00</b> looks clear.</div>
+  </section>
+
+  <div class="actions">
+    <button class="btn primary">Start now</button>
+    <div class="hours">away for <span class="pill">5 h</span></div>
+    <button class="btn ghost">Pause</button>
+    <button class="btn" disabled>Approve full-auto</button>
+  </div>
+
+  <section class="panel">
+    <div class="label">Your week, by hour — moonlighter works the quiet hours <span style="color:var(--gold)">▣</span></div>
+    <div class="heatwrap">
+      <div class="heat">
+        <div></div><div></div><div class="winh"></div><div class="winh"></div><div class="winh"></div><div class="winh"></div><div></div><div class="a1"></div><div class="a2"></div><div class="a3"></div><div class="a3"></div><div class="a2"></div><div class="a2"></div><div class="a3"></div><div class="a3"></div><div class="a3"></div><div class="a2"></div><div class="a2"></div><div class="a1"></div><div class="a1"></div><div class="a2"></div><div class="a1"></div><div class="a1"></div><div></div>
+        <div></div><div></div><div class="winh"></div><div class="winh"></div><div class="winh"></div><div class="winh"></div><div></div><div class="a1"></div><div class="a3"></div><div class="a3"></div><div class="a2"></div><div class="a3"></div><div class="a2"></div><div class="a2"></div><div class="a3"></div><div class="a2"></div><div class="a3"></div><div class="a1"></div><div class="a1"></div><div class="a1"></div><div class="a1"></div><div class="a2"></div><div></div><div></div>
+        <div></div><div></div><div class="winh"></div><div class="winh"></div><div class="winh"></div><div class="winh"></div><div></div><div></div><div class="a2"></div><div class="a3"></div><div class="a3"></div><div class="a3"></div><div class="a1"></div><div class="a2"></div><div class="a2"></div><div class="a3"></div><div class="a2"></div><div class="a2"></div><div class="a1"></div><div></div><div class="a1"></div><div class="a1"></div><div class="a1"></div><div></div>
+      </div>
+    </div>
+    <div class="heatlbl"><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div>
+  </section>
+
+  <section class="runs">
+    <div class="label">The ledger of nights</div>
+    <table>
+      <thead><tr><th>Night</th><th>What was done</th><th>Spend</th><th>Status</th><th></th></tr></thead>
+      <tr>
+        <td class="date">June 11th</td>
+        <td>Sorted 49 stray files out of ~/code · filed 7 inbox ideas · cleared two untitled canvases</td>
+        <td><span class="pct">5.8%</span> · 412k tok</td>
+        <td><span class="tag clean">clean</span></td>
+        <td style="color:var(--gold)">view →</td>
+      </tr>
+      <tr>
+        <td class="date">June 10th</td>
+        <td>Skipped — you were active at 02:40</td>
+        <td>—</td>
+        <td><span class="tag">skipped</span></td>
+        <td style="color:var(--dim)">log →</td>
+      </tr>
+      <tr>
+        <td class="date">June 9th</td>
+        <td>Dry run — proposed 14 actions, touched nothing</td>
+        <td><span class="pct">0.4%</span> · 31k tok</td>
+        <td><span class="tag">observed</span></td>
+        <td style="color:var(--gold)">view →</td>
+      </tr>
+    </table>
+  </section>
+
+  <footer>moonlighter · works while you sleep · everything revertible</footer>
+</div>
+
+<!-- mobile fixed action bar -->
+<div class="mobilebar">
+  <button class="btn primary">▶ Start · away 5h</button>
+  <button class="btn ghost">Pause</button>
+</div>
+</body>
+</html>

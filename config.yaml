@@ -1,0 +1,99 @@
+# Moonlighter configuration (template / defaults).
+#
+# You normally DON'T edit this file — the first-run setup wizard (open the panel and it
+# redirects to /setup) writes your choices to  ~/.moonlighter/config.local.yaml , which is
+# merged OVER these defaults at load time. Keep this file as documented defaults.
+#
+# All paths are relative to your home directory unless absolute.
+
+# First-run gate. Ships FALSE so the panel shows the setup wizard. The wizard sets it true.
+setup_complete: false
+
+# Operating mode. 'observe' = dry-run only (proposes, changes nothing). 'full-auto' = acts
+# on safe, reversible things itself and asks approval for bigger items. The wizard sets this.
+mode: observe
+
+# Candidate hours for autonomous runs. 'auto' learns them from your usage history.
+window: auto
+
+# Max current 5-hour utilization (%) before a SCHEDULED run starts (keeps the window free if
+# you're around). Manual "Start now" ignores this.
+five_hour_max_pct: 20
+
+# SPARE-CAPACITY TARGET. A run keeps working until the 5-hour window reaches this %, then
+# stops. The window resets every 5h, so unused capacity is wasted — the point is to fill it.
+five_hour_target_pct: 80
+
+# Skip if there was an active Claude Code session within this many hours.
+recent_activity_hours: 2
+
+# Percentage of your WEEKLY allowance always kept in reserve for you.
+weekly_reserve_pct: 20
+
+# Hard wall-clock cap per run (minutes).
+max_wallclock_min: 360
+
+# Budget (% of weekly) for a manual "Start now" run.
+manual_budget_pct: 10
+
+# Folders Moonlighter may ACT in (reversibly). The wizard sets these from a visual browser.
+# Default: your home directory. Everything outside these is read-only or off-limits.
+work_roots:
+  - "~"
+
+# Optional notes/Obsidian vault for the maintenance pass. Empty = no vault step.
+vault_path: ""
+
+# Devices. backup.kind: none | ssh | mount. audit: read-only remote hosts to survey over SSH.
+# All optional — most people have none. The wizard fills these in.
+devices:
+  backup:
+    kind: none
+  audit: []
+
+# Extra paths Moonlighter must never read or touch. Credentials/secrets/.env are ALWAYS
+# off-limits in code regardless of this list.
+off_limits: []
+
+# Directory where nightly reports are written.
+report_dir: ~/.moonlighter/reports
+
+# Kill-switch. If this file exists, Moonlighter never starts a run.
+kill_switch: ~/.moonlighter/pause
+
+# Panel server. bind_host 0.0.0.0 lets another device on your private network (e.g. your phone
+# over Tailscale) reach it; all state-changing actions stay PIN-gated. 127.0.0.1 = this machine.
+ui_port: 8377
+bind_host: 127.0.0.1
+
+# Phone access tier: lan | tailscale | ntfy | tunnel  (see the README).
+phone_tier: lan
+
+# PIN for state-changing actions. The setup wizard sets this — leave empty here.
+pin: ""
+
+# Forecast model — how much of the week to reserve before Moonlighter spends. Auto-refines to
+# the 75th percentile of your observed weekly peaks once a usage log exists.
+forecast:
+  typical_week_end_pct: 85
+
+# Overnight session model. 'default' = your normal model (Opus-class) as a director delegating
+# mechanical work to Sonnet sub-agents; 'sonnet' = whole session on Sonnet.
+night_model: default
+
+# --- Notification channels. The panel + report files are always on; these are extras. ---
+notify:
+  windows_toast: false           # desktop notification (Windows toast / macOS / notify-send)
+  ntfy: false                    # push to the ntfy app (set topics below)
+  vault_log: false               # append each run to a vault changelog note
+  vault_log_path: ""
+
+# --- ntfy bridge (only if phone_tier: ntfy or notify.ntfy: true). Topics are the only secret. ---
+ntfy:
+  base_url: https://ntfy.sh
+  notify_topic: ""               # set to a long random string, e.g. moonlighter-<random-hex>
+  command_topic: ""
+
+# OS specifics. distro only matters on WSL (for \wsl$ file links from the panel).
+wsl:
+  distro: Ubuntu
