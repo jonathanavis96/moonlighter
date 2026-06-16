@@ -99,10 +99,16 @@ def do_trash(path):
     _guard(path)
     rd = _run_dir()
     p = pathlib.Path(path).resolve()
+    if not p.exists():
+        print(f"NOTE: {p} does not exist — nothing to trash")
+        return
     rel = str(p).lstrip("/")
     dest = rd / "trash" / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
-    do_snapshot(str(p))
+    # Only snapshot files; for directories the move into trash/ IS the full,
+    # revertible copy (shutil.copy2 throws IsADirectoryError on a dir).
+    if p.is_file():
+        do_snapshot(str(p))
     shutil.move(str(p), str(dest))
     _manifest_append({"op": "trash", "path": str(p), "trash": str(dest)})
     print(f"trashed (revertible) {p}")
