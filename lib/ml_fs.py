@@ -53,9 +53,20 @@ def _sha(path):
         return None
 
 
+def _abspath(path):
+    """Absolute + normalized path WITHOUT following symlinks.
+
+    Unlike ``Path.resolve()`` (which dereferences symlinks to their target),
+    this keeps the literal path the session named. ml_fs must act on that path
+    itself — moving/trashing/snapshotting a symlink must affect the symlink,
+    never the file it points at (audit finding #1, a real data-loss vector).
+    """
+    return pathlib.Path(os.path.abspath(path))
+
+
 def _snap_dest(rd, path):
     """Mirror the absolute path under snapshot/ to avoid name collisions."""
-    p = pathlib.Path(path).resolve()
+    p = _abspath(path)
     rel = str(p).lstrip("/")
     dest = rd / "snapshot" / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -71,23 +82,32 @@ def _guard(path):
 def do_snapshot(path):
     _guard(path)
     rd = _run_dir()
-    p = pathlib.Path(path).resolve()
-    if not p.exists():
+    p = _abspath(path)
+    if not os.path.lexists(p):  # lexists: true even for a dangling symlink
         print(f"NOTE: {p} does not exist — nothing to snapshot")
         return
     dest = _snap_dest(rd, p)
-    if not dest.exists():
-        shutil.copy2(p, dest)
-    _manifest_append({"op": "snapshot", "path": str(p), "sha": _sha(p)})
+    if not os.path.lexists(dest):
+        # follow_symlinks=False: a symlink is snapshotted AS a symlink (the link
+        # itself), never copied through to the file it points at.
+        shutil.copy2(p, dest, follow_symlinks=False)
+    if p.is_symlink():
+        _manifest_append({"op": "snapshot", "path": str(p),
+                          "symlink_target": os.readlink(p)})
+    else:
+        _manifest_append({"op": "snapshot", "path": str(p), "sha": _sha(p)})
     print(f"snapshotted {p}")
 
 
 def do_move(src, dst):
     _guard(src)
     _guard(dst)
-    p = pathlib.Path(src).resolve()
-    d = pathlib.Path(dst).resolve()
-    if p.exists() and p.is_file():
+    p = _abspath(src)
+    d = _abspath(dst)
+    # Snapshot the source literally. shutil.move recreates a symlink as a
+    # symlink, so removing the old .resolve() is what actually fixes the target
+    # mutation — the snapshot is a belt-and-braces backup for files/links.
+    if p.is_symlink() or (os.path.lexists(p) and p.is_file()):
         do_snapshot(str(p))
     d.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(p), str(d))
@@ -98,16 +118,18 @@ def do_move(src, dst):
 def do_trash(path):
     _guard(path)
     rd = _run_dir()
-    p = pathlib.Path(path).resolve()
-    if not p.exists():
+    p = _abspath(path)
+    if not os.path.lexists(p):
         print(f"NOTE: {p} does not exist — nothing to trash")
         return
     rel = str(p).lstrip("/")
     dest = rd / "trash" / rel
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # Only snapshot files; for directories the move into trash/ IS the full,
-    # revertible copy (shutil.copy2 throws IsADirectoryError on a dir).
-    if p.is_file():
+    # Snapshot files and symlinks; for a real directory the move into trash/ IS
+    # the full, revertible copy (shutil.copy2 throws IsADirectoryError on a dir).
+    # is_symlink() is checked first so a symlink-to-a-dir is snapshotted as a
+    # link, not treated as its target directory.
+    if p.is_symlink() or p.is_file():
         do_snapshot(str(p))
     shutil.move(str(p), str(dest))
     _manifest_append({"op": "trash", "path": str(p), "trash": str(dest)})
@@ -122,8 +144,12 @@ def do_write_begin(path):
 
 def do_created(path):
     _guard(path)
-    p = pathlib.Path(path).resolve()
-    _manifest_append({"op": "created", "path": str(p)})
+    p = _abspath(path)
+    if p.is_symlink():
+        _manifest_append({"op": "created", "path": str(p),
+                          "symlink_target": os.readlink(p)})
+    else:
+        _manifest_append({"op": "created", "path": str(p)})
     print(f"recorded created {p}")
 
 

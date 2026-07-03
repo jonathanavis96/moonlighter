@@ -1,6 +1,7 @@
 """revert.py — build and run a byte-for-byte revert from a run's manifest."""
 import json
 import pathlib
+import re
 import shlex
 import subprocess
 import sys
@@ -9,18 +10,43 @@ STATE_RUNS = pathlib.Path.home() / ".moonlighter" / "runs"
 
 
 def _read_manifest(run_dir):
+    recs, _ = _read_manifest_with_torn(run_dir)
+    return recs
+
+
+def _read_manifest_with_torn(run_dir):
+    """Return (records, torn_line_count).
+
+    A torn/corrupt line (e.g. an interleaved concurrent append) is unparseable
+    JSON. It must NOT vanish silently — that would under-revert the run with no
+    signal. We count it and warn loudly on stderr so the caller can flag the
+    revert as incomplete (audit findings #2/#5).
+    """
     mf = run_dir / "manifest.jsonl"
     if not mf.exists():
-        return []
+        return [], 0
     recs = []
-    for line in mf.read_text(encoding="utf-8").splitlines():
+    torn = 0
+    for lineno, line in enumerate(mf.read_text(encoding="utf-8").splitlines(), 1):
         line = line.strip()
-        if line:
-            try:
-                recs.append(json.loads(line))
-            except Exception:
-                pass
-    return recs
+        if not line:
+            continue
+        try:
+            recs.append(json.loads(line))
+        except Exception:
+            torn += 1
+            print(
+                f"WARNING: manifest.jsonl line {lineno} is unparseable "
+                f"(torn/corrupt) and will NOT be reverted: {line[:120]!r}",
+                file=sys.stderr,
+            )
+    if torn:
+        print(
+            f"WARNING: {torn} manifest line(s) could not be parsed for run "
+            f"{run_dir.name}; this revert is INCOMPLETE.",
+            file=sys.stderr,
+        )
+    return recs, torn
 
 
 def _snap_path(run_dir, abs_path):
@@ -29,7 +55,7 @@ def _snap_path(run_dir, abs_path):
 
 def build_revert_script(run_dir):
     """Emit revert.sh content. Operations are reversed in manifest order."""
-    recs = _read_manifest(run_dir)
+    recs, torn = _read_manifest_with_torn(run_dir)
     lines = [
         "#!/usr/bin/env bash",
         "# Auto-generated revert for Moonlighter run " + run_dir.name,
@@ -39,6 +65,12 @@ def build_revert_script(run_dir):
         'echo "Reverting run ' + run_dir.name + '..."',
         "",
     ]
+    if torn:
+        lines.append(
+            f'echo "WARNING: {torn} manifest line(s) were corrupt/torn and could '
+            f'NOT be reverted — this revert is INCOMPLETE." >&2'
+        )
+        lines.append("")
     for rec in reversed(recs):
         op = rec.get("op")
         if op == "created":
@@ -53,7 +85,16 @@ def build_revert_script(run_dir):
         elif op == "snapshot":
             p = rec["path"]
             snap = _snap_path(run_dir, p)
-            lines.append(f'if [ -e {shlex.quote(str(snap))} ]; then mkdir -p "$(dirname {shlex.quote(p)})"; cp -p {shlex.quote(str(snap))} {shlex.quote(p)} && echo "  restored {p}"; fi')
+            # -P: never dereference; -p: preserve mode/times. Restores a
+            # snapshotted symlink as a symlink, a regular file as its bytes.
+            lines.append(f'if [ -e {shlex.quote(str(snap))} ] || [ -L {shlex.quote(str(snap))} ]; then mkdir -p "$(dirname {shlex.quote(p)})"; cp -Pp {shlex.quote(str(snap))} {shlex.quote(p)} && echo "  restored {p}"; fi')
+        elif op == "note":
+            # perm-fix notes carry an explicit "Revert: <cmd>" — honour it here
+            # too, not only in the per-item panel path (_revert_one).
+            m = re.search(r"Revert:\s*(chmod\s+\S+\s+\S.*)$", rec.get("text", ""))
+            if m:
+                cmd = m.group(1)
+                lines.append(f'{cmd} && echo "  ran: {cmd}"')
     lines += ["", 'echo "Revert complete."', ""]
     return "\n".join(lines)
 
@@ -80,7 +121,6 @@ def run_revert(run_id):
 # --- per-item revert (for the night-digest tick-to-revert checklist) ---
 
 import os    # noqa: E402
-import re    # noqa: E402
 import shutil  # noqa: E402
 
 
@@ -108,9 +148,14 @@ def _revert_one(run_dir, rec):
         if op == "snapshot":
             p = rec["path"]
             snap = _snap_path(run_dir, p)
-            if snap.exists():
+            if snap.exists() or snap.is_symlink():
                 pathlib.Path(p).parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(snap, p)
+                if snap.is_symlink():
+                    if pathlib.Path(p).is_symlink() or pathlib.Path(p).exists():
+                        pathlib.Path(p).unlink()
+                    os.symlink(os.readlink(snap), p)
+                else:
+                    shutil.copy2(snap, p)
             return True, f"restored {p}"
         if op == "note":
             # perm-fix notes carry an explicit "Revert: <cmd>" — honour it.
