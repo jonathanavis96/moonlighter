@@ -71,7 +71,7 @@ def _pwr_toggle_html(paused: bool, active_run: bool) -> str:
 def _pwr_toggle_script() -> str:
     """Standalone power-toggle wiring for pages that don't share the main dashboard's
     big script (run page, night page): click handler + a 20s /api/status poll so the
-    toggle stays state-reflecting even if `paused` changed elsewhere (CLI, ntfy bridge,
+    toggle stays state-reflecting even if `paused` changed elsewhere (CLI,
     another tab) while this page was open."""
     return """
 <script>
@@ -1879,7 +1879,6 @@ input:focus{outline:none;border-color:var(--gold)}
     <p class="lead">The morning report always appears in this panel. Optionally also:</p>
     <label class="opt"><input type="checkbox" id="n-toast"><div><div class="t">Desktop notification</div><div class="d">A popup when a run finishes — Windows toast, macOS notification, or Linux <code>notify-send</code>.</div></div></label>
     <label class="opt"><input type="checkbox" id="n-vault"><div><div class="t">Append to my notes vault</div><div class="d">Log each run to a changelog note in your vault.</div></div></label>
-    <label class="opt"><input type="checkbox" id="n-ntfy"><div><div class="t">ntfy push to phone</div><div class="d">Push the report to the ntfy app (configure topics in config later).</div></div></label>
   </div></div>
 
   <!-- STEP 6: pin -->
@@ -1924,7 +1923,7 @@ let S = {
   backupDest: ((PRE.devices||{}).backup||{}).dest_path || "",
   backupMount: ((PRE.devices||{}).backup||{}).kind==="mount" ? ((PRE.devices||{}).backup||{}).dest_path||"" : "",
   audit: (((PRE.devices||{}).audit)||[]).slice(),
-  notify: Object.assign({windows_toast:false,ntfy:false,vault_log:false}, PRE.notify||{}),
+  notify: Object.assign({windows_toast:false,vault_log:false}, PRE.notify||{}),
   pin: ""
 };
 
@@ -2064,10 +2063,8 @@ function addAudit(){S.audit.push({name:'',ssh_host:''});renderAudit();}
 function bindNotify(){
   document.getElementById('n-toast').checked=!!S.notify.windows_toast;
   document.getElementById('n-vault').checked=!!S.notify.vault_log;
-  document.getElementById('n-ntfy').checked=!!S.notify.ntfy;
   document.getElementById('n-toast').onchange=e=>S.notify.windows_toast=e.target.checked;
   document.getElementById('n-vault').onchange=e=>S.notify.vault_log=e.target.checked;
-  document.getElementById('n-ntfy').onchange=e=>S.notify.ntfy=e.target.checked;
 }
 
 /* ---- review ---- */
@@ -2076,7 +2073,7 @@ function renderReview(){
   let bk=S.backupKind==='ssh'?('ssh '+S.backupHost+':'+(S.backupDest||'backups')):
          S.backupKind==='mount'?('mount '+S.backupMount):'none';
   const aud=S.audit.filter(h=>h.ssh_host).map(h=>h.name||h.ssh_host).join(', ')||'none';
-  const nt=Object.keys(S.notify).filter(k=>S.notify[k]).map(k=>({windows_toast:'toast',vault_log:'vault',ntfy:'ntfy'}[k])).join(', ')||'panel only';
+  const nt=Object.keys(S.notify).filter(k=>S.notify[k]).map(k=>({windows_toast:'toast',vault_log:'vault'}[k])).join(', ')||'panel only';
   document.getElementById('review').innerHTML=
     rl('Mode',S.mode)+rl('Fill 5-hour window to',S.five+'%')+rl('Keep in reserve',S.reserve+'%')+
     rl('Max run',S.wall+' min')+
@@ -2187,7 +2184,6 @@ def _validate_setup(body: dict) -> dict:
 
     nin = body.get("notify") or {}
     notify = {"windows_toast": bool(nin.get("windows_toast")),
-              "ntfy": bool(nin.get("ntfy")),
               "vault_log": bool(nin.get("vault_log"))}
 
     return {
@@ -2218,7 +2214,7 @@ def _build_setup_html(cfg: dict) -> str:
         "vault_path": cfg.get("vault_path_resolved") or "",
         "devices": cfg.get("devices") or {"backup": {"kind": "none"}, "audit": []},
         "notify": {k: bool((cfg.get("notify") or {}).get(k))
-                   for k in ("windows_toast", "ntfy", "vault_log")},
+                   for k in ("windows_toast", "vault_log")},
         "pin_set": bool(cfg.get("pin")),
         "home": str(pathlib.Path.home()),
     }
@@ -2502,8 +2498,8 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
     def _handle_pause(self, body: dict):
         # No PIN check — pausing is deliberately frictionless (see design doc "Accepted
         # risk"): off is the fail-safe direction (no spend, no filesystem mutation), so
-        # it stays open even though this endpoint is shared with the ntfy bridge. Only
-        # resume (which spends quota) stays PIN-gated below.
+        # it stays open even for a caller without the PIN. Only resume (which spends
+        # quota) stays PIN-gated below.
         try:
             p = CFG["kill_switch_path"]
             p.parent.mkdir(parents=True, exist_ok=True)

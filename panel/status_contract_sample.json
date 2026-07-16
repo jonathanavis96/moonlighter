@@ -3,7 +3,7 @@
   "mode": "observe",
   "approved": false,
   "paused": false,
-  "phone_tier": "ntfy",
+  "phone_tier": "tailscale",
   "live": true,
   "usage_error": null,
   "usage": {

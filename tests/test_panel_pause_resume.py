@@ -4,10 +4,9 @@ Deliberate asymmetry: /api/pause drops its PIN check (off is fail-safe, and the
 worst case of an unwanted pause is that no run happens). /api/resume keeps its
 PIN check (on spends quota, stays gated).
 
-Scope of the relaxation: the panel's own UI is the only caller of these endpoints.
-lib/ntfy_bridge.py enforces its own PIN independently (rejecting any message whose
-last token isn't the PIN) and dispatches by calling cli.cmd_pause() directly, so
-phone `pause <PIN>` is unaffected by the endpoint's PIN check either way.
+Scope of the relaxation: this endpoint is reachable only on the private network the
+panel is bound to (LAN or Tailscale, per `phone_tier` — see AGENTS.md Step 4). There
+is no separate remote front door; the panel's own UI is the only caller.
 
 Spins up the REAL PanelHandler on an ephemeral 127.0.0.1 port in a background
 thread — never the live install (PID from `config.ui_port`, currently 8377) and

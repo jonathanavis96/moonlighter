@@ -102,7 +102,7 @@ it if they want, but let *them* make the choices:
 2. **Folders** — a visual browser to pick what it may work in, and what's off-limits.
 3. **Vault** — optional notes folder.
 4. **Devices** — optional backup destination + read-only audit hosts (most people: none).
-5. **Notifications** — desktop toast / vault log / ntfy.
+5. **Notifications** — desktop toast / vault log.
 6. **PIN** — they set it.
 7. **Review & finish** — writes `~/.moonlighter/config.local.yaml`.
 

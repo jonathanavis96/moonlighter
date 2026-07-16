@@ -66,7 +66,7 @@ kill_switch: ~/.moonlighter/pause
 ui_port: 8377
 bind_host: 127.0.0.1
 
-# Phone access tier: lan | tailscale | ntfy | tunnel  (see the README).
+# Phone access tier: lan | tailscale | tunnel  (see the README).
 phone_tier: lan
 
 # PIN for state-changing actions. The setup wizard sets this — leave empty here.
@@ -84,15 +84,8 @@ night_model: default
 # --- Notification channels. The panel + report files are always on; these are extras. ---
 notify:
   windows_toast: false           # desktop notification (Windows toast / macOS / notify-send)
-  ntfy: false                    # push to the ntfy app (set topics below)
   vault_log: false               # append each run to a vault changelog note
   vault_log_path: ""
-
-# --- ntfy bridge (only if phone_tier: ntfy or notify.ntfy: true). Topics are the only secret. ---
-ntfy:
-  base_url: https://ntfy.sh
-  notify_topic: ""               # set to a long random string, e.g. moonlighter-<random-hex>
-  command_topic: ""
 
 # OS specifics. distro only matters on WSL (for \wsl$ file links from the panel).
 wsl:

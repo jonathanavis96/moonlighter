@@ -357,7 +357,7 @@ For a shell command an item gives you (e.g. a cache clean), run it, then `note` 
       `gh workflow run` deploy pipelines, pushing to a *live-site* branch. (A normal `git push` to a
       code repo's remote for the approved item is fine; shipping to a live website is not.)
     * SENDING to other people/services — emails, WhatsApp/Slack/Discord messages, calendar invites,
-      outreach. Internal notifications to YOURSELF (ntfy/toast) are fine.
+      outreach. Internal notifications to YOURSELF (desktop toast) are fine.
     * the literal secret STORES below; anything NOT in the approved list.
 - OFF-LIMITS paths (never touch):
 {off}
@@ -427,7 +427,7 @@ def _supervise(cfg, run_dir, summary_path, hard_deadline, bucket, five_target, w
                     stop_reason = "idle"
                     break
 
-        # Switched off from the panel/CLI/ntfy bridge — check every iteration (not
+        # Switched off from the panel/CLI — check every iteration (not
         # gated behind BUDGET_CHECK_SEC) so "off" takes effect promptly.
         if cfg["kill_switch_path"].exists():
             stop_reason = "switched off from panel"

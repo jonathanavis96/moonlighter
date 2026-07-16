@@ -1,4 +1,4 @@
-"""notify.py — outbound report notifications (LOCAL only: toast, ntfy push, vault).
+"""notify.py — outbound report notifications (LOCAL only: toast, vault).
 
 These are the ONLY outward-ish calls Moonlighter makes, and they are explicitly
 user-approved report channels — never used by the night session itself.
@@ -9,7 +9,6 @@ import pathlib
 import platform
 import shutil
 import subprocess
-import urllib.request
 
 
 def _is_wsl():
@@ -61,24 +60,6 @@ def windows_toast(title, body):
     return desktop_notify(title, body)
 
 
-def ntfy_push(cfg, message, title="Moonlighter"):
-    nt = (cfg.get("ntfy") or {})
-    base = nt.get("base_url", "https://ntfy.sh").rstrip("/")
-    topic = nt.get("notify_topic")
-    if not topic:
-        return False
-    try:
-        req = urllib.request.Request(
-            f"{base}/{topic}",
-            data=message.encode("utf-8"),
-            headers={"Title": title, "Tags": "crescent_moon"},
-        )
-        urllib.request.urlopen(req, timeout=15)
-        return True
-    except Exception:
-        return False
-
-
 def vault_append(cfg, line):
     nc = (cfg.get("notify") or {})
     if not nc.get("vault_log"):
@@ -110,8 +91,6 @@ def report_ready(cfg, headline, report_path=None, spend_line=""):
     body = headline + (f"\n{spend_line}" if spend_line else "")
     if nc.get("windows_toast") and desktop_notify("Moonlighter", body):
         fired.append("toast")
-    if nc.get("ntfy") and ntfy_push(cfg, body):
-        fired.append("ntfy")
     if nc.get("vault_log"):
         vline = f"- **{date}** — {headline}" + (f" ({spend_line})" if spend_line else "")
         if vault_append(cfg, vline):
