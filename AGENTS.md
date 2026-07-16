@@ -111,17 +111,23 @@ first night** so they can read a report before trusting it to act, then flip to 
 
 ## Step 6 — Scheduling (so it runs on its own)
 
-For autonomous overnight runs, schedule the gate. On Linux/macOS/WSL, add a cron entry that runs
-the gate every ~30 min during the user's idle window (the gate itself decides whether to actually
-run, based on budget and recent activity):
+For autonomous overnight runs, schedule **the gate** — `lib/gate.py`, not `moonlight start`. The
+gate is the thing that decides whether to run, based on the idle window, recent activity and
+budget; it returns without launching unless the verdict is GO. `moonlight start` is the *manual*
+"I'm away, go now" path and deliberately **skips** the idle-window and activity checks, so cronning
+it would spend quota every 30 minutes even while the user is at the keyboard.
 
 ```bash
-# example: check every 30 min between 01:00–08:00 local
-crontab -l 2>/dev/null | { cat; echo "*/30 1-8 * * * cd $(pwd) && ./moonlight start >/dev/null 2>&1"; } | crontab -
+# check every 30 min, around the clock
+crontab -l 2>/dev/null | { cat; echo "*/30 * * * * cd $(pwd) && python3 lib/gate.py >/dev/null 2>&1"; } | crontab -
 ```
 
-Adjust the window to when the user is asleep / away. On WSL, ensure the distro runs at boot (or
-that the user opens a WSL shell), since WSL cron only runs while the distro is up.
+Run it on **every** hour, not just overnight: the gate also samples usage on each tick, and that
+history is what the idle-window discovery and the weekly forecast are built from. Restricting it
+to a fixed night window starves both — the gate works out the user's idle hours on its own.
+
+On WSL, ensure the distro runs at boot (or that the user opens a WSL shell), since WSL cron only
+runs while the distro is up.
 
 > **Verify cron is actually running** before relying on it (`systemctl status cron` or
 > `service cron status`; start/enable if needed).
