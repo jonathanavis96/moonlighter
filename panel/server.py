@@ -32,6 +32,7 @@ import gate as gatemod       # noqa: E402
 import state                 # noqa: E402
 import revert as revertmod   # noqa: E402
 import digest as digestmod   # noqa: E402
+import schedule as schedulemod  # noqa: E402
 
 DEVNULL = subprocess.DEVNULL
 TMUX = "moonlighter"
@@ -124,6 +125,44 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 </script>
 """
+
+
+def _sched_tasks_html(tasks) -> str:
+    """The scheduled-task list, server-rendered with its initial state (same pattern
+    as the power toggle / clog / heatmap). Cancelled tasks are history, not shown."""
+    visible = [t for t in (tasks or []) if t.get("status") != schedulemod.STATUS_CANCELLED]
+    if not visible:
+        return '<div style="color:var(--dim)">no scheduled tasks</div>'
+    stcls = {schedulemod.STATUS_FIRED: "sok", schedulemod.STATUS_MISSED: "sfail"}
+    rows = []
+    for t in visible:
+        when = str(t.get("run_at", ""))
+        try:
+            dt = datetime.datetime.fromisoformat(t.get("run_at", ""))
+            when = dt.strftime("%a %b %d, %H:%M")
+        except Exception:
+            pass
+        status_ = str(t.get("status", ""))
+        cls = stcls.get(status_, "shold")
+        note_html = ""
+        if status_ == schedulemod.STATUS_MISSED and t.get("note"):
+            note_html = f'<div class="stnote">{_html_escape(str(t["note"]))}</div>'
+        folder = str(t.get("folder") or "")
+        folder_html = (f' <span style="color:var(--dim)">— {_html_escape(folder)}</span>'
+                       if folder else "")
+        cancel_html = ""
+        if status_ == schedulemod.STATUS_PENDING:
+            tid = _html_escape(str(t.get("id", "")))
+            cancel_html = (f'<button class="stcancel" type="button" '
+                           f'onclick="doScheduleCancel(\'{tid}\')">cancel</button>')
+        rows.append(
+            '<div class="schedrow"><div class="st">'
+            f'<div class="sthead"><span class="sttime">{_html_escape(when)}</span>'
+            f'<span class="{cls}">{_html_escape(status_)}</span></div>'
+            f'<div class="stprompt">{_html_escape(str(t.get("prompt","")))}{folder_html}</div>'
+            f'{note_html}</div>{cancel_html}</div>'
+        )
+    return "\n".join(rows)
 
 
 def _human_tokens(n) -> str:
@@ -326,6 +365,125 @@ function pwrRender(paused, activeRun) {{
   btn.innerHTML = '<span class="pwrdot"></span>' + (paused ? 'OFF' : 'ON');
 }}
 
+// ---- Scheduled tasks ----
+function renderSchedTasks(tasks) {{
+  const list = el('sched-tasks');
+  if (!list) return;
+  const visible = (tasks || []).filter(t => t.status !== 'cancelled');
+  if (!visible.length) {{ list.innerHTML = '<div style="color:var(--dim)">no scheduled tasks</div>'; return; }}
+  list.innerHTML = visible.map(t => {{
+    let when = t.run_at || '';
+    try {{
+      const d = new Date(t.run_at);
+      if (!isNaN(d.getTime())) {{
+        when = d.toLocaleString(undefined, {{weekday:'short', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit'}});
+      }}
+    }} catch (e) {{}}
+    const cls = t.status === 'fired' ? 'sok' : (t.status === 'missed' ? 'sfail' : 'shold');
+    const note = (t.status === 'missed' && t.note) ? '<div class="stnote">' + esc(t.note) + '</div>' : '';
+    const folder = t.folder ? ' <span style="color:var(--dim)">— ' + esc(t.folder) + '</span>' : '';
+    const cancelBtn = t.status === 'pending'
+      ? '<button class="stcancel" type="button" onclick="doScheduleCancel(\\'' + esc(t.id) + '\\')">cancel</button>'
+      : '';
+    return '<div class="schedrow"><div class="st"><div class="sthead"><span class="sttime">' + esc(when) + '</span>' +
+      '<span class="' + cls + '">' + esc(t.status || '') + '</span></div>' +
+      '<div class="stprompt">' + esc(t.prompt || '') + folder + '</div>' + note + '</div>' + cancelBtn + '</div>';
+  }}).join('');
+}}
+
+async function doScheduleCancel(id) {{
+  if (!confirm('Cancel this scheduled task?')) return;
+  const pin = pinPrompt();
+  if (!pin) return;
+  const ok = await postAction('/api/schedule/delete', {{id, pin}});
+  if (ok) refreshStatus();
+}}
+
+function schedEsc(s) {{ return String(s).replace(/\\\\/g, '\\\\\\\\').replace(/'/g, "\\\\'"); }}
+
+async function schedLoadDir(path) {{
+  const b = el('sf-browser');
+  if (!b) return;
+  b.classList.add('open');
+  b.innerHTML = '<div class="bcrumb">loading…</div>';
+  const pin = (el('sf-pin') || {{}}).value || '';
+  let url = '/api/fs?pin=' + encodeURIComponent(pin);
+  if (path) url += '&path=' + encodeURIComponent(path);
+  let d;
+  try {{
+    const r = await fetch(url);
+    if (r.status === 403) {{ b.innerHTML = '<div class="bcrumb">wrong PIN — enter it below first</div>'; return; }}
+    d = await r.json();
+  }} catch (e) {{ b.innerHTML = '<div class="bcrumb">error</div>'; return; }}
+  let rows = (d.dirs || []).map(x =>
+    '<div class="brow"><span class="nav" onclick="schedLoadDir(\\'' + schedEsc(x.path) + '\\')">' +
+    '<span class="ic">▸</span>' + esc(x.name) + '</span>' +
+    '<button class="mini" type="button" onclick="schedPickFolder(\\'' + schedEsc(x.path) + '\\')">use</button></div>'
+  ).join('');
+  if (!rows) rows = '<div class="brow"><span style="color:var(--dim);padding:4px">(no sub-folders)</span></div>';
+  b.innerHTML = '<div class="bcrumb">📂 ' + esc(d.path || '') + '</div>' +
+    '<div class="blist">' + rows + '</div>' +
+    '<div class="bbar">' +
+      (d.parent ? '<button class="mini" type="button" onclick="schedLoadDir(\\'' + schedEsc(d.parent) + '\\')">↑ up</button>' : '') +
+      '<button class="mini" type="button" onclick="schedPickFolder(\\'' + schedEsc(d.path || '') + '\\')">use THIS folder</button>' +
+      '<span style="flex:1"></span>' +
+      '<button class="mini" type="button" onclick="el(\\'sf-browser\\').classList.remove(\\'open\\')">close</button>' +
+    '</div>';
+}}
+function schedPickFolder(p) {{
+  const f = el('sf-folder'); if (f) f.value = p;
+  const b = el('sf-browser'); if (b) b.classList.remove('open');
+}}
+function schedAddDocRow(value) {{
+  const wrap = document.createElement('div');
+  wrap.className = 'docrow';
+  wrap.innerHTML = '<input type="text" placeholder="/path/to/document" value="' + esc(value || '') + '">' +
+    '<button class="mini" type="button" onclick="this.parentElement.remove()">×</button>';
+  const docs = el('sf-docs');
+  if (docs) docs.appendChild(wrap);
+}}
+function schedRunAtISO() {{
+  const d = (el('sf-date') || {{}}).value, t = (el('sf-time') || {{}}).value;
+  if (!d || !t) return null;
+  const dt = new Date(d + 'T' + t + ':00');
+  if (isNaN(dt.getTime())) return null;
+  const pad = n => String(n).padStart(2, '0');
+  const off = -dt.getTimezoneOffset();
+  const sign = off >= 0 ? '+' : '-';
+  const oh = pad(Math.floor(Math.abs(off) / 60)), om = pad(Math.abs(off) % 60);
+  return d + 'T' + t + ':00' + sign + oh + ':' + om;
+}}
+async function doScheduleSubmit() {{
+  const errEl = el('sf-err');
+  if (errEl) errEl.textContent = '';
+  const prompt = ((el('sf-prompt') || {{}}).value || '').trim();
+  const folder = ((el('sf-folder') || {{}}).value || '').trim();
+  const runAt = schedRunAtISO();
+  const wcRaw = (el('sf-wallclock') || {{}}).value;
+  const fiveRaw = (el('sf-five') || {{}}).value;
+  const pin = (el('sf-pin') || {{}}).value || '';
+  const docs = Array.from(document.querySelectorAll('#sf-docs input')).map(i => i.value.trim()).filter(Boolean);
+  if (!prompt) {{ if (errEl) errEl.textContent = 'Prompt is required.'; return; }}
+  if (!folder) {{ if (errEl) errEl.textContent = 'Pick a folder.'; return; }}
+  if (!runAt) {{ if (errEl) errEl.textContent = 'Pick a run date and time.'; return; }}
+  if (!pin) {{ if (errEl) errEl.textContent = 'PIN is required.'; return; }}
+  const ok = await postAction('/api/schedule', {{
+    prompt, folder, docs, run_at: runAt,
+    wallclock_min: wcRaw ? parseInt(wcRaw, 10) : null,
+    five_target: fiveRaw ? parseInt(fiveRaw, 10) : null,
+    pin
+  }});
+  if (ok) {{
+    el('sf-prompt').value = ''; el('sf-folder').value = '';
+    el('sf-date').value = ''; el('sf-time').value = '';
+    el('sf-wallclock').value = ''; el('sf-five').value = ''; el('sf-pin').value = '';
+    el('sf-docs').innerHTML = '';
+    const details = document.querySelector('.schedform');
+    if (details) details.open = false;
+    refreshStatus();
+  }}
+}}
+
 // ---- Live run-in-progress card ----
 let ML_RUN_STARTED = null;
 let ML_RUN_ACTIVE = false;
@@ -377,6 +535,9 @@ function renderStatus(s) {{
   // update it even when there's no live usage data to show. But absent `paused` is
   // unknown, not false: keep the last known state rather than reading as ON.
   if (typeof s.paused === 'boolean') pwrRender(s.paused, !!s.active_run);
+  // Scheduled tasks don't depend on the usage API — render them even when
+  // live usage data is unavailable, same reasoning as the power toggle above.
+  renderSchedTasks(s.scheduled_tasks);
   if (s.live === false) {{
     el('mode-line').textContent = '● no live data';
     ['five-huge','week-huge'].forEach(id => el(id).textContent = '--');
@@ -624,6 +785,18 @@ document.addEventListener('DOMContentLoaded', () => {{
   const saveBtn = el('btn-save-settings');
   if (saveBtn) saveBtn.addEventListener('click', doSaveSettings);
 
+  // Scheduled task form
+  const sfBrowse = el('sf-browse');
+  if (sfBrowse) sfBrowse.addEventListener('click', () => {{
+    const br = el('sf-browser');
+    if (br && br.classList.contains('open')) {{ br.classList.remove('open'); return; }}
+    schedLoadDir(null);
+  }});
+  const sfAdddoc = el('sf-adddoc');
+  if (sfAdddoc) sfAdddoc.addEventListener('click', () => schedAddDocRow());
+  const sfSubmit = el('sf-submit');
+  if (sfSubmit) sfSubmit.addEventListener('click', doScheduleSubmit);
+
   // Answer the agent's clarifying question
   const askSend = el('ask-send');
   if (askSend) askSend.addEventListener('click', async () => {{
@@ -762,6 +935,12 @@ document.addEventListener('DOMContentLoaded', () => {{
     # 9. clog div (replace whole nested block, depth-aware)
     new_clog_block = f'<div class="clog" id="clog">\n{clog_html}\n</div>'
     html = _replace_div_block(html, '<div class="clog">', new_clog_block)
+
+    # 9b. Scheduled-task list (replace whole nested block, depth-aware) — the form
+    # itself is static markup, wired by the appended script below.
+    sched_tasks_html = _sched_tasks_html(status.get("scheduled_tasks"))
+    new_sched_block = f'<div class="schedlist" id="sched-tasks">\n{sched_tasks_html}\n</div>'
+    html = _replace_div_block(html, '<div class="schedlist" id="sched-tasks">', new_sched_block)
 
     # 10. Summary
     old_summary = '<div class="summary">Holding — your window is hot and you\'re still around. Tonight at <b>02:00</b> looks clear.</div>'
@@ -2119,6 +2298,86 @@ if(PRE.setup_complete && PRE.pin_set){document.getElementById('unlock').classLis
 </body></html>"""
 
 
+def _validate_schedule(body: dict, cfg: dict) -> dict:
+    """Validate + normalise a `POST /api/schedule` payload into a task dict ready
+    for `schedule.add()`. Raises ValueError(human message) on the first bad field —
+    the caller returns it as the 400 body."""
+    prompt = str(body.get("prompt", "") or "").strip()
+    if not prompt:
+        raise ValueError("prompt is required")
+
+    run_at_raw = str(body.get("run_at", "") or "").strip()
+    if not run_at_raw:
+        raise ValueError("run_at is required")
+    try:
+        run_at = datetime.datetime.fromisoformat(run_at_raw)
+    except Exception:
+        raise ValueError(f"run_at is not a valid date/time: {run_at_raw!r}")
+    if run_at.tzinfo is None:
+        run_at = run_at.astimezone()
+    now = datetime.datetime.now().astimezone()
+    if run_at <= now:
+        raise ValueError("run_at must be in the future")
+
+    folder = str(body.get("folder", "") or "").strip()
+    if not folder:
+        raise ValueError("folder is required")
+    folder_path = pathlib.Path(os.path.expanduser(folder))
+    if not folder_path.is_dir():
+        raise ValueError(f"folder does not exist or is not a directory: {folder}")
+    if cfgmod.is_off_limits(str(folder_path), cfg):
+        raise ValueError(f"folder is off-limits: {folder}")
+
+    docs_in = body.get("docs") or []
+    docs = []
+    for d in docs_in:
+        d = str(d).strip()
+        if not d:
+            continue
+        if not pathlib.Path(os.path.expanduser(d)).exists():
+            raise ValueError(f"document does not exist: {d}")
+        docs.append(d)
+
+    # Note: 0 is a deliberately-supplied value, not "unset" — only None/"" (missing
+    # or an empty form field) skip validation. 0 must still fail the range check.
+    wallclock_min = body.get("wallclock_min")
+    if wallclock_min in (None, ""):
+        wallclock_min = None
+    else:
+        try:
+            wallclock_min = int(wallclock_min)
+        except (TypeError, ValueError):
+            raise ValueError("wallclock_min must be a number")
+        if wallclock_min <= 0:
+            raise ValueError("wallclock_min must be greater than 0")
+
+    five_target = body.get("five_target")
+    if five_target in (None, ""):
+        five_target = None
+    else:
+        try:
+            five_target = int(five_target)
+        except (TypeError, ValueError):
+            raise ValueError("five_target must be a number")
+        if not (1 <= five_target <= 100):
+            raise ValueError("five_target must be between 1 and 100")
+
+    return {
+        "id": schedulemod.new_id(run_at),
+        "created": state.now_iso(),
+        "run_at": run_at.isoformat(),
+        "prompt": prompt,
+        "folder": str(folder_path),
+        "docs": docs,
+        "wallclock_min": wallclock_min,
+        "five_target": five_target,
+        "status": schedulemod.STATUS_PENDING,
+        "fired_at": None,
+        "run_id": None,
+        "note": None,
+    }
+
+
 def _validate_setup(body: dict) -> dict:
     """Validate + normalise the wizard payload into the config overlay to persist.
     Raises ValueError(human message) on bad input. Only known keys pass through."""
@@ -2296,6 +2555,8 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             "/api/start": self._handle_start,
             "/api/pause": self._handle_pause,
             "/api/resume": self._handle_resume,
+            "/api/schedule": self._handle_schedule_create,
+            "/api/schedule/delete": self._handle_schedule_delete,
             "/api/approve": self._handle_approve,
             "/api/mode": self._handle_mode,
             "/api/settings": self._handle_settings,
@@ -2315,6 +2576,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
     def _handle_root(self):
         try:
             status = gatemod.compute_status(CFG)
+            status["scheduled_tasks"] = schedulemod.load()
         except Exception as exc:
             status = {"live": False, "error": str(exc)}
         try:
@@ -2327,6 +2589,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
     def _handle_status(self):
         try:
             status = gatemod.compute_status(CFG)
+            status["scheduled_tasks"] = schedulemod.load()
             body = json.dumps(status, default=str).encode("utf-8")
             self._send(200, "application/json", body)
         except Exception as exc:
@@ -2519,6 +2782,32 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(200, {"ok": True})
         except Exception as exc:
             self._send_json(500, {"ok": False, "error": str(exc)})
+
+    def _handle_schedule_create(self, body: dict):
+        if not self._check_pin(body):
+            self._send_json(403, {"ok": False, "error": "bad pin"})
+            return
+        try:
+            task = _validate_schedule(body, CFG)
+        except ValueError as exc:
+            self._send_json(400, {"ok": False, "error": str(exc)})
+            return
+        schedulemod.add(task)
+        self._send_json(200, {"ok": True, "task": task})
+
+    def _handle_schedule_delete(self, body: dict):
+        if not self._check_pin(body):
+            self._send_json(403, {"ok": False, "error": "bad pin"})
+            return
+        task_id = str(body.get("id", "") or "").strip()
+        if not task_id:
+            self._send_json(400, {"ok": False, "error": "id is required"})
+            return
+        result = schedulemod.cancel(task_id)
+        if result is None:
+            self._send_json(400, {"ok": False, "error": "task not found or not pending"})
+            return
+        self._send_json(200, {"ok": True})
 
     def _handle_settings(self, body: dict):
         if not self._check_pin(body):

@@ -283,5 +283,35 @@
     ]
   ],
   "runs": [],
-  "night": "next window  04:00 \u2013 11:00"
+  "night": "next window  04:00 \u2013 11:00",
+  "scheduled_tasks": [
+    {
+      "id": "20260717-0400-a1b2",
+      "created": "2026-07-16T21:40:00+02:00",
+      "run_at": "2026-07-17T04:00:00+02:00",
+      "prompt": "Work through this repo and fix security patching",
+      "folder": "/home/user/code/example",
+      "docs": ["/home/user/notes/brief.md"],
+      "wallclock_min": 300,
+      "five_target": 80,
+      "status": "pending",
+      "fired_at": null,
+      "run_id": null,
+      "note": null
+    },
+    {
+      "id": "20260716-0430-c3d4",
+      "created": "2026-07-16T09:12:00+02:00",
+      "run_at": "2026-07-16T04:30:00+02:00",
+      "prompt": "Tidy the downloads folder",
+      "folder": "/home/user/downloads",
+      "docs": [],
+      "wallclock_min": null,
+      "five_target": null,
+      "status": "missed",
+      "fired_at": null,
+      "run_id": null,
+      "note": "switched off"
+    }
+  ]
 }

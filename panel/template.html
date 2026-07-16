@@ -63,7 +63,9 @@ h1 em{font-style:italic;color:var(--gold)}
 .pwrtoggle.off:hover{border-color:var(--fail);background:rgba(232,134,108,.08)}
 .label{font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:var(--dim);margin-bottom:16px}
 /* ---------- hero ---------- */
-.hero{display:grid;grid-template-columns:1fr 1fr 1.45fr;gap:34px;align-items:stretch}
+.hero{display:grid;grid-template-columns:1fr 1fr 1.45fr;grid-template-rows:auto auto;gap:34px;align-items:stretch}
+.graphpanel{grid-row:1/3}
+.schedcard{grid-column:1/3;grid-row:2}
 .stat .huge{font-family:'Archivo Black',sans-serif;font-weight:400;letter-spacing:-.01em;line-height:.85;
   font-size:clamp(68px,8vw,96px);font-variant-numeric:lining-nums tabular-nums}
 .stat .huge small{font-size:.32em;color:var(--dim);letter-spacing:0;margin-left:5px}
@@ -78,6 +80,53 @@ h1 em{font-style:italic;color:var(--gold)}
 .panel{border:1px solid var(--line);padding:24px 26px;background:rgba(11,16,29,.55)}
 .legend{display:flex;gap:18px;font-size:10.5px;color:var(--dim);letter-spacing:.12em;margin-top:12px;text-transform:uppercase;flex-wrap:wrap}
 .legend i{display:inline-block;width:18px;height:2px;margin-right:7px;vertical-align:middle}
+/* ---------- scheduled task card ---------- */
+.schedcard{display:flex;flex-direction:column;gap:16px}
+.schedlist{display:flex;flex-direction:column;gap:10px}
+.schedrow{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;
+  padding:12px 14px;border:1px solid var(--line);background:rgba(5,7,12,.4);font-size:12.5px}
+.schedrow .st{flex:1;min-width:0}
+.schedrow .sthead{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;text-transform:uppercase;letter-spacing:.1em;font-size:10.5px}
+.schedrow .sttime{color:var(--moon);font-family:'Fraunces',serif;font-style:italic;font-size:14px;letter-spacing:0;text-transform:none}
+.schedrow .sok{color:var(--ok)} .schedrow .sfail{color:var(--fail)} .schedrow .shold{color:var(--hold)}
+.schedrow .stprompt{color:#d6dce8;margin-top:6px;line-height:1.5;word-break:break-word;font-size:12.5px;text-transform:none;letter-spacing:0}
+.schedrow .stnote{color:var(--fail);margin-top:5px;font-size:11px}
+.schedrow .stcancel{border:1px solid var(--line);background:transparent;color:var(--dim);
+  font-family:'IBM Plex Mono',monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;
+  padding:8px 13px;cursor:pointer;flex:none;transition:all .2s}
+.schedrow .stcancel:hover{border-color:var(--fail);color:var(--fail);background:rgba(232,134,108,.08)}
+.schedform{border-top:1px solid var(--line);padding-top:16px}
+.schedform summary{cursor:pointer;color:var(--gold);font-size:11px;letter-spacing:.22em;text-transform:uppercase;list-style:none}
+.schedform summary::-webkit-details-marker{display:none}
+.schedbody{margin-top:18px;display:flex;flex-direction:column;gap:14px}
+.sfld{display:block;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:7px}
+.sfopt{text-transform:none;letter-spacing:0;color:#66708a}
+.schedbody input[type=text],.schedbody input[type=password],.schedbody input[type=number],
+.schedbody input[type=date],.schedbody input[type=time],.schedbody textarea{
+  width:100%;box-sizing:border-box;background:rgba(0,0,0,.3);border:1px solid var(--line);
+  color:var(--moon);font-family:'IBM Plex Mono',monospace;font-size:13px;padding:10px 11px}
+.schedbody textarea{resize:vertical}
+.sfrow{display:flex;gap:10px}
+.sfrow input{flex:1}
+.sfgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.sfcol{display:flex;flex-direction:column}
+.sfhint{font-size:11px;color:var(--dim);line-height:1.6}
+.sferr{color:var(--fail);font-size:12px;min-height:15px}
+.docrow{display:flex;gap:8px;margin-bottom:8px}
+.docrow input{flex:1}
+.mini{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;
+  padding:9px 13px;background:transparent;border:1px solid var(--line);color:var(--dim);cursor:pointer;flex:none;transition:all .2s}
+.mini:hover{border-color:var(--dim);color:var(--moon)}
+.browser{display:none;border:1px solid var(--line);background:rgba(5,7,12,.55);margin-top:8px;font-size:12px}
+.browser.open{display:block}
+.bcrumb{padding:9px 12px;color:var(--dim);border-bottom:1px solid var(--line);word-break:break-all}
+.blist{max-height:200px;overflow-y:auto}
+.brow{display:flex;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--line)}
+.brow:last-child{border-bottom:none}
+.brow .nav{cursor:pointer;color:var(--moon)}
+.brow .nav:hover{color:var(--gold)}
+.brow .ic{color:var(--dim);margin-right:6px}
+.bbar{display:flex;gap:8px;padding:9px 12px;align-items:center}
 /* ---------- gate console ---------- */
 .console{margin-top:38px;border:1px solid var(--line);background:rgba(5,7,12,.7)}
 .console .bar{display:flex;justify-content:space-between;align-items:center;
@@ -136,7 +185,9 @@ footer{margin-top:60px;text-align:center;color:var(--dim);font-size:10px;letter-
   .pwrtoggle{padding:8px 12px;font-size:9.5px;letter-spacing:.14em}
   .hero{grid-template-columns:1fr 1fr;gap:0 22px}
   .stat .huge{font-size:clamp(64px,21vw,84px)}
-  .graphpanel{grid-column:1/-1;margin-top:26px}
+  .graphpanel{grid-column:1/-1;grid-row:auto;margin-top:26px}
+  .schedcard{grid-column:1/-1;grid-row:auto;margin-top:26px}
+  .sfgrid{grid-template-columns:1fr}
   .console{margin-top:28px}
   .clog{padding:14px 16px;font-size:11.5px;line-height:2;overflow-x:auto;white-space:nowrap}
   .summary{font-size:15px;padding:13px 16px}
@@ -201,6 +252,55 @@ footer{margin-top:60px;text-align:center;color:var(--dim);font-size:10px;letter-
         <span><i style="background:rgba(143,168,216,.5)"></i>your forecast</span>
         <span><i style="background:#d4b478"></i>with moonlighter</span>
       </div>
+    </div>
+    <div class="panel schedcard">
+      <div class="label">Scheduled task</div>
+      <div class="schedlist" id="sched-tasks">
+        <div style="color:var(--dim)">no scheduled tasks</div>
+      </div>
+      <details class="schedform">
+        <summary>+ Schedule a task</summary>
+        <div class="schedbody">
+          <label class="sfld">Prompt</label>
+          <textarea id="sf-prompt" rows="3" placeholder="What should it work on?"></textarea>
+
+          <label class="sfld">Folder</label>
+          <div class="sfrow">
+            <input type="text" id="sf-folder" placeholder="pick a folder…" readonly>
+            <button class="mini" type="button" id="sf-browse">browse…</button>
+          </div>
+          <div class="browser" id="sf-browser"></div>
+
+          <label class="sfld">Documents <span class="sfopt">(optional)</span></label>
+          <div id="sf-docs"></div>
+          <button class="mini" type="button" id="sf-adddoc">+ add a document path</button>
+
+          <div class="sfgrid">
+            <div class="sfcol">
+              <label class="sfld">Run at</label>
+              <div class="sfrow">
+                <input type="date" id="sf-date">
+                <input type="time" id="sf-time" step="1800">
+              </div>
+            </div>
+            <div class="sfcol">
+              <label class="sfld">Duration <span class="sfopt">(min, optional)</span></label>
+              <input type="number" id="sf-wallclock" min="1" placeholder="e.g. 240">
+            </div>
+            <div class="sfcol">
+              <label class="sfld">5h-window target <span class="sfopt">(%, optional)</span></label>
+              <input type="number" id="sf-five" min="1" max="100" placeholder="e.g. 80">
+            </div>
+          </div>
+          <p class="sfhint">Fires on the gate's 30-minute tick — 04:00 or 04:30, never 04:07.</p>
+
+          <label class="sfld">PIN</label>
+          <input type="password" id="sf-pin" inputmode="numeric" placeholder="4–8 digits" autocomplete="off">
+
+          <button class="btn primary" type="button" id="sf-submit">Schedule task</button>
+          <div class="sferr" id="sf-err"></div>
+        </div>
+      </details>
     </div>
   </section>
 
