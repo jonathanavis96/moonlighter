@@ -20,6 +20,7 @@ import history               # noqa: E402
 import budget as budgetmod   # noqa: E402
 import usage_api             # noqa: E402
 import graph as graphmod     # noqa: E402
+import schedule              # noqa: E402
 
 TMUX_SESSION = "moonlighter"
 
@@ -123,8 +124,6 @@ def compute_status(cfg=None, manual_away_hours=None):
     usage, uerr = gather_usage()
     window = resolve_window(cfg)
     abname = active_bucket_name(cfg)
-    is_first_run = len(state.calibration_records()) == 0
-
     # --- hard skips ---
     kill = cfg["kill_switch_path"].exists()
     inflight = run_in_flight()
@@ -318,12 +317,105 @@ def _runs_for_panel(limit=8):
     return out
 
 
+def _process_scheduled(cfg):
+    """Fire at most one due scheduled task.
+
+    A scheduled task named a specific time, so unlike the nightly job it skips
+    the idle-window and recent-activity checks below — it still refuses when
+    Moonlighter is switched OFF, and the runner still enforces the wallclock/5h
+    caps via the env overrides passed here.
+
+    Returns True if a task was launched this tick, so main() can skip its own
+    GO launch below and avoid firing two runs in the same tick (a race with
+    run_in_flight(), which only sees a session once run.sh actually starts one).
+    """
+    fired = False
+    for task in schedule.due():
+        tid = task.get("id")
+
+        if cfg["kill_switch_path"].exists():
+            schedule.update(tid, status=schedule.STATUS_MISSED, note="switched off")
+            continue
+
+        if fired:
+            break
+
+        if run_in_flight():
+            schedule.update(tid, status=schedule.STATUS_MISSED,
+                             note="a run was already in flight")
+            continue
+
+        usage, uerr = gather_usage()
+        if usage is None:
+            schedule.update(tid, status=schedule.STATUS_MISSED,
+                            note=uerr or "usage API unreachable")
+            continue
+
+        abname = active_bucket_name(cfg)
+        budget_cfg = dict(cfg)
+        if task.get("five_target"):
+            budget_cfg["five_hour_target_pct"] = task["five_target"]
+        bud = budgetmod.compute(usage, budget_cfg, abname)
+        if not bud["ok"]:
+            if bud["five_room"] <= 0.5:
+                note = f"5h window already at {bud['five_now']:.0f}%"
+            else:
+                note = f"weekly reserve reached ({bud['weekly_now']:.0f}% of {bud['weekly_cap']:.0f}%)"
+            schedule.update(tid, status=schedule.STATUS_MISSED, note=note)
+            continue
+
+        claimed = schedule.claim(tid)
+        if claimed is None:
+            continue
+        task = claimed
+
+        state.ensure_dirs()
+        mission = schedule.build_mission(task)
+        mission_file = state.STATE_DIR / f"scheduled-mission-{tid}.md"
+        mission_file.write_text(mission, encoding="utf-8")
+
+        env = dict(os.environ)
+        env["ML_MISSION_FILE"] = str(mission_file)
+        env["ML_ACTIVE_BUCKET"] = abname
+        if task.get("wallclock_min"):
+            env["ML_WALLCLOCK_MIN"] = str(task["wallclock_min"])
+        if task.get("five_target"):
+            env["ML_FIVE_TARGET"] = str(task["five_target"])
+
+        run_sh = cfg["_project_dir"] / "run.sh"
+        try:
+            subprocess.Popen(["bash", str(run_sh)], env=env,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        except OSError as exc:
+            schedule.transition(tid, schedule.STATUS_LAUNCHING,
+                                status=schedule.STATUS_MISSED,
+                                note=f"launch failed: {exc}")
+            continue
+        schedule.transition(tid, schedule.STATUS_LAUNCHING,
+                            status=schedule.STATUS_FIRED, fired_at=state.now_iso())
+        state.gate_log(f"scheduled task {tid} fired -> {mission_file.name}")
+        fired = True
+
+    return fired
+
+
 def main():
     """Cron entry. Compute status; launch the runner if the verdict is GO."""
     cfg = cfgmod.load()
     usage_now, _ = gather_usage()
     if usage_now is not None:
         state.append_usage_sample(usage_now)  # learn the weekly curve
+
+    # Scheduled tasks are handled first and wrapped in isolation: a bug in the
+    # scheduler must never take down the nightly gate below. A task fired here
+    # already used this tick's single launch slot.
+    scheduled_fired = False
+    try:
+        scheduled_fired = _process_scheduled(cfg)
+    except Exception as exc:
+        state.gate_log(f"scheduler error: {exc}")
+
     status = compute_status(cfg)
     verdict = status["gate"]["verdict"]
     bud = status["gate"]["budget"]
@@ -332,7 +424,7 @@ def main():
             f"five_room={bud['five_room'] if bud else '—'}%")
     state.gate_log(line)
 
-    if verdict != "GO":
+    if verdict != "GO" or scheduled_fired:
         return 0
 
     # GO — launch the runner (run.sh decides dry-run vs act from config mode; the

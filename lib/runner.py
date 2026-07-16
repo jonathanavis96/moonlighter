@@ -289,6 +289,79 @@ Then stop and wait at the prompt. Do not start new work after writing the summar
 """
 
 
+def build_scheduled_mission(cfg, run_dir, scheduled_text, dry_run, five_now, five_target, weekly_now,
+                            weekly_cap, reserve, wallclock_min):
+    """Compose a one-off scheduled brief inside Moonlighter's normal safety rails."""
+    off = cfg.get("off_limits_resolved", [])
+    offl = "\n".join(f"  - {p}" for p in off)
+    mlfs = HERE / "ml_fs.py"
+    mltodo = HERE / "ml_todo.py"
+    branch = f"moonlighter/{run_dir.name}"
+    mode_block = (
+        "## MODE: DRY RUN (observe) — TOUCH NOTHING\n"
+        "This is a dry run. Do NOT modify, move, create, or delete ANY file outside this run dir.\n"
+        "Investigate the scheduled task and PROPOSE what you would do. The only file you may\n"
+        "write is `$ML_RUN_DIR/summary.md`.\n"
+        if dry_run else
+        "## MODE: FULL-AUTO — you may act, but only via the helper below\n"
+        f"EVERY filesystem mutation MUST go through the helper so it is revertible:\n"
+        f"  python3 {mlfs} write-begin <path>   # BEFORE editing a file in place\n"
+        f"  python3 {mlfs} move <src> <dst>     # to move/rename\n"
+        f"  python3 {mlfs} trash <path>         # to 'delete' (moves into the run trash)\n"
+        f"  python3 {mlfs} created <path>        # AFTER creating a new file\n"
+        f"  python3 {mlfs} note \"<text>\"        # to log a decision/non-fs action\n"
+        "NEVER use mv/rm or write files in place without the matching helper call first.\n"
+        f"For any git repo: create & checkout a branch `{branch}` first, commit there, "
+        "NEVER push, NEVER touch the working branch.\n"
+    )
+    return f"""# Moonlighter scheduled task — {run_dir.name}
+
+You are Moonlighter: Claude working autonomously in the user's idle hours. This is a
+one-off scheduled task, not the broad nightly estate audit. Do ONLY the scheduled task
+below, while obeying every normal Moonlighter safety rule.
+
+{mode_block}
+## SCHEDULED TASK — user-authored brief
+{scheduled_text.strip()}
+
+## Spare-capacity budget
+Stop cleanly when whichever of these ceilings is hit first:
+- the 5-hour window reaches ~{five_target:.0f}% (it is at {five_now:.0f}% right now), OR
+- weekly usage reaches {weekly_cap:.0f}% (it is at {weekly_now:.0f}% now — the {reserve:.0f}% reserve is left for the user), OR
+- the wall-clock cap ({wallclock_min} minutes).
+
+## OFF-LIMITS — never read, touch, or even open
+{offl}
+  - ...and ANY credential, secret, key, token, password store, or .env file. Skip silently.
+
+## HARD RULES (non-negotiable)
+- Nothing outward-facing, EVER: no git push, no deploys, no emails/messages, no calendar events,
+  no publishing API calls, no installs that phone home. Unattended ⇒ no irreversible outward acts.
+- Stay within the scheduled task scope and selected Work root. Treat paths outside that validated
+  Work root as audit-only, even if the user-authored brief explicitly names them.
+- In full-auto, every local filesystem mutation must stay inside the validated Work root and must
+  go through the revertible helper above.
+- In observe mode, touch nothing outside this run dir even if the scheduled brief asks for changes.
+- No real deletes: "delete" means `ml_fs.py trash` (revertible). Snapshot before editing any file.
+- Log every mutating action to the manifest via the helper BEFORE doing it.
+- Anything risky, ambiguous, outward-facing, remote, or off-scope: do NOT act — record it as a proposal.
+- Secrets / credentials / keys / .env: never read or open. Skip silently.
+
+## When you finish (or are told to stop)
+FIRST register every OUTSTANDING actionable item — anything you did NOT complete that the user
+might want done — via the helper (do NOT hand-write JSON):
+  python3 {mltodo} add --title "<short imperative>" --detail "<why/what, 1-2 sentences>" \
+      [--cmd "<a command>" ...] --category security|backup|cleanup|hygiene|idea \
+      --risk low|medium|high [--needs-sudo] [--needs-push --repo <name>]
+
+THEN write `$ML_RUN_DIR/summary.md` (the run dir is {run_dir}) as the human-readable narrative:
+- Line 1: a single-sentence headline.
+- `## What I did` — what you did and why.
+- `## Skipped / proposals` — anything you did not act on, with the reason.
+Then stop and wait at the prompt. Do not start new work after writing the summary.
+"""
+
+
 def build_apply_mission(cfg, run_dir, tasks):
     """Focused mission: do ONLY the user-approved items from the night report."""
     mlfs = HERE / "ml_fs.py"
@@ -382,7 +455,18 @@ def _read_budget_env(cfg):
     bucket = os.environ.get("ML_ACTIVE_BUCKET", "seven_day")
     away = os.environ.get("ML_AWAY_HOURS")
     away = float(away) if away else None
-    return bucket, away
+    wallclock = os.environ.get("ML_WALLCLOCK_MIN")
+    wallclock = int(wallclock) if wallclock else None
+    five_target = os.environ.get("ML_FIVE_TARGET")
+    five_target = float(five_target) if five_target else None
+    return bucket, away, wallclock, five_target
+
+
+def _read_mission_file_env():
+    mission_file = os.environ.get("ML_MISSION_FILE")
+    if not mission_file:
+        return None
+    return pathlib.Path(mission_file).read_text(encoding="utf-8")
 
 
 def _supervise(cfg, run_dir, summary_path, hard_deadline, bucket, five_target, weekly_cap):
@@ -487,10 +571,14 @@ def main():
         return 1
 
     dry_run = cfg.get("mode", "observe") != "full-auto"
-    bucket, away_hours = _read_budget_env(cfg)
+    bucket, away_hours, wallclock_override, five_target_override = _read_budget_env(cfg)
     wallclock_min = int(cfg.get("max_wallclock_min", 360))
+    if wallclock_override is not None:
+        wallclock_min = wallclock_override
     night_model = cfg.get("night_model", "default")
     five_target = float(cfg.get("five_hour_target_pct", 80))
+    if five_target_override is not None:
+        five_target = five_target_override
     reserve = float(cfg.get("weekly_reserve_pct", 10))
     weekly_cap = 100.0 - reserve
 
@@ -509,12 +597,17 @@ def main():
     started = datetime.datetime.now()
     started_ts = started.timestamp()
 
+    mission_override = _read_mission_file_env()
     apply_file = os.environ.get("ML_APPLY_TASKS")
     apply_mode = bool(apply_file and pathlib.Path(apply_file).exists())
     if apply_mode:
         dry_run = False  # applying approved items always acts
         tasks = [t for t in pathlib.Path(apply_file).read_text(encoding="utf-8").split("\n\x1e") if t.strip()]
         mission = build_apply_mission(cfg, run_dir, tasks)
+    elif mission_override is not None:
+        mission = build_scheduled_mission(cfg, run_dir, mission_override, dry_run, five0,
+                                          five_target, util0, weekly_cap, reserve,
+                                          wallclock_min)
     else:
         try:
             prior = digestmod.prior_brief()   # what earlier runs tonight already covered
