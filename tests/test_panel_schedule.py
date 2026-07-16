@@ -18,8 +18,11 @@ import json
 import pathlib
 import sys
 import threading
+import types
 
 import pytest
+
+sys.modules.setdefault("yaml", types.SimpleNamespace(safe_load=lambda *a, **k: {}, safe_dump=lambda *a, **k: ""))
 
 PANEL = pathlib.Path(__file__).resolve().parents[1] / "panel"
 LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
@@ -43,6 +46,7 @@ def running_panel(tmp_path, monkeypatch):
     test_cfg["kill_switch_path"] = tmp_path / "pause"
     test_cfg["pin"] = TEST_PIN
     test_cfg["off_limits_resolved"] = []
+    test_cfg["work_roots_resolved"] = [str(work_dir)]
     monkeypatch.setattr(panelserver, "CFG", test_cfg)
 
     sched_path = tmp_path / "scheduled.json"
@@ -155,6 +159,21 @@ def test_schedule_create_rejects_nonexistent_folder(running_panel):
     assert "folder" in data["error"].lower()
     assert schedulemod.load() == []
 
+
+def test_schedule_create_rejects_folder_outside_work_roots(running_panel, tmp_path):
+    port, _work_dir = running_panel
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    status, data = _post(port, "/api/schedule", {
+        "prompt": "do the thing", "folder": str(outside),
+        "run_at": _future_iso(), "pin": TEST_PIN,
+    })
+
+    assert status == 400
+    assert data["ok"] is False
+    assert "work roots" in data["error"].lower()
+    assert schedulemod.load() == []
 
 def test_schedule_create_success_persists_pending_task(running_panel):
     port, work_dir = running_panel

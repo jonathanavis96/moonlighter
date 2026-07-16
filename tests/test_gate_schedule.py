@@ -59,6 +59,11 @@ def env(tmp_path, monkeypatch):
 
     monkeypatch.setattr(gate.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(gate, "run_in_flight", lambda: False)
+    monkeypatch.setattr(gate, "gather_usage", lambda: ({
+        "five_hour": {"utilization": 10},
+        "seven_day": {"utilization": 20},
+        "seven_day_sonnet": {"utilization": 20},
+    }, None))
 
     cfg = {
         "kill_switch_path": tmp_path / "pause",  # not created => ON by default
@@ -157,3 +162,40 @@ def test_future_task_left_pending_and_not_launched(env):
     assert popen_calls == []
     updated = schedule.get(task["id"])
     assert updated["status"] == schedule.STATUS_PENDING
+
+
+def test_due_task_missed_when_custom_five_hour_cap_already_hit(env):
+    cfg, popen_calls = env
+
+    now = datetime.datetime.now().astimezone()
+    task = _task(now - datetime.timedelta(minutes=5), five_target=8)
+    schedule.save([task])
+
+    fired = gate._process_scheduled(cfg)
+
+    assert fired is False
+    assert popen_calls == []
+    updated = schedule.get(task["id"])
+    assert updated["status"] == schedule.STATUS_MISSED
+    assert "5h window" in updated["note"]
+
+
+def test_due_task_missed_when_weekly_cap_already_hit(env, monkeypatch):
+    cfg, popen_calls = env
+    monkeypatch.setattr(gate, "gather_usage", lambda: ({
+        "five_hour": {"utilization": 10},
+        "seven_day": {"utilization": 95},
+        "seven_day_sonnet": {"utilization": 20},
+    }, None))
+
+    now = datetime.datetime.now().astimezone()
+    task = _task(now - datetime.timedelta(minutes=5))
+    schedule.save([task])
+
+    fired = gate._process_scheduled(cfg)
+
+    assert fired is False
+    assert popen_calls == []
+    updated = schedule.get(task["id"])
+    assert updated["status"] == schedule.STATUS_MISSED
+    assert "weekly reserve" in updated["note"]

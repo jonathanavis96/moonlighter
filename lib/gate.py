@@ -342,6 +342,25 @@ def _process_scheduled(cfg):
                              note="a run was already in flight")
             continue
 
+        usage, uerr = gather_usage()
+        if usage is None:
+            schedule.update(tid, status=schedule.STATUS_MISSED,
+                            note=uerr or "usage API unreachable")
+            continue
+
+        abname = active_bucket_name(cfg)
+        budget_cfg = dict(cfg)
+        if task.get("five_target"):
+            budget_cfg["five_hour_target_pct"] = task["five_target"]
+        bud = budgetmod.compute(usage, budget_cfg, abname)
+        if not bud["ok"]:
+            if bud["five_room"] <= 0.5:
+                note = f"5h window already at {bud['five_now']:.0f}%"
+            else:
+                note = f"weekly reserve reached ({bud['weekly_now']:.0f}% of {bud['weekly_cap']:.0f}%)"
+            schedule.update(tid, status=schedule.STATUS_MISSED, note=note)
+            continue
+
         state.ensure_dirs()
         mission = schedule.build_mission(task)
         mission_file = state.STATE_DIR / f"scheduled-mission-{tid}.md"
@@ -349,7 +368,7 @@ def _process_scheduled(cfg):
 
         env = dict(os.environ)
         env["ML_MISSION_FILE"] = str(mission_file)
-        env["ML_ACTIVE_BUCKET"] = active_bucket_name(cfg)
+        env["ML_ACTIVE_BUCKET"] = abname
         if task.get("wallclock_min"):
             env["ML_WALLCLOCK_MIN"] = str(task["wallclock_min"])
         if task.get("five_target"):

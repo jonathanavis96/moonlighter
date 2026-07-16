@@ -2322,9 +2322,12 @@ def _validate_schedule(body: dict, cfg: dict) -> dict:
     folder = str(body.get("folder", "") or "").strip()
     if not folder:
         raise ValueError("folder is required")
-    folder_path = pathlib.Path(os.path.expanduser(folder))
+    folder_path = pathlib.Path(os.path.expanduser(folder)).resolve()
     if not folder_path.is_dir():
         raise ValueError(f"folder does not exist or is not a directory: {folder}")
+    work_roots = [pathlib.Path(r).resolve() for r in (cfg.get("work_roots_resolved") or [])]
+    if work_roots and not any(folder_path == r or folder_path.is_relative_to(r) for r in work_roots):
+        raise ValueError(f"folder is outside configured work roots: {folder}")
     if cfgmod.is_off_limits(str(folder_path), cfg):
         raise ValueError(f"folder is off-limits: {folder}")
 
