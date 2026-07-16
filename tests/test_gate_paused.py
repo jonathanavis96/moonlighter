@@ -1,5 +1,4 @@
-"""Regression tests for the panel on/off toggle (docs/superpowers/specs/
-2026-07-16-moonlighter-on-off-toggle-design.md).
+"""Regression tests for the gate's `paused` status field.
 
 `gate.compute_status()` must expose an explicit top-level `paused` boolean derived
 from kill-switch FILE EXISTENCE — never string-matched from a check's `name`/`why`

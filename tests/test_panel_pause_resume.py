@@ -1,9 +1,9 @@
-"""Regression tests for the panel's /api/pause and /api/resume PIN behaviour
-(docs/superpowers/specs/2026-07-16-moonlighter-on-off-toggle-design.md).
+"""Regression tests for the panel's /api/pause and /api/resume PIN behaviour.
 
 Deliberate asymmetry: /api/pause drops its PIN check (off is fail-safe, frictionless
 — this endpoint is shared with the ntfy bridge, and that exposure is an accepted
-risk per the design doc). /api/resume keeps its PIN check (on spends quota, stays
+risk: the worst case of an unwanted pause is that no run happens). /api/resume
+keeps its PIN check (on spends quota, stays
 gated).
 
 Spins up the REAL PanelHandler on an ephemeral 127.0.0.1 port in a background

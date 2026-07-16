@@ -431,13 +431,13 @@ def _supervise(cfg, run_dir, summary_path, hard_deadline, bucket, five_target, w
         # gated behind BUDGET_CHECK_SEC) so "off" takes effect promptly.
         if cfg["kill_switch_path"].exists():
             stop_reason = "switched off from panel"
-            _budget_stop()
+            _graceful_stop("Switched off from the panel")
             break
 
         now = time.time()
         if datetime.datetime.now() >= hard_deadline:
             stop_reason = "wall-clock cap"
-            _budget_stop()
+            _graceful_stop("Wall-clock cap reached")
             break
         if now - last_budget_check >= BUDGET_CHECK_SEC:
             last_budget_check = now
@@ -448,11 +448,11 @@ def _supervise(cfg, run_dir, summary_path, hard_deadline, bucket, five_target, w
                 # Spare-capacity stops: 5h window filled to target, or weekly reserve reached.
                 if five >= five_target:
                     stop_reason = f"5h window filled to target ({five:.0f}% ≥ {five_target:.0f}%)"
-                    _budget_stop()
+                    _graceful_stop("Budget reached")
                     break
                 if cur >= weekly_cap:
                     stop_reason = f"weekly reserve reached ({cur:.0f}% ≥ {weekly_cap:.0f}%)"
-                    _budget_stop()
+                    _graceful_stop("Budget reached")
                     break
             except Exception:
                 pass
@@ -633,9 +633,9 @@ def main():
     return 0
 
 
-def _budget_stop():
+def _graceful_stop(why="Budget reached"):
     subprocess.run(["tmux", "send-keys", "-t", TMUX,
-                    "Budget reached — stop now, leave everything in a clean state, "
+                    f"{why} — stop now, leave everything in a clean state, "
                     "and write $ML_RUN_DIR/summary.md.", "Enter"])
     time.sleep(120)
 

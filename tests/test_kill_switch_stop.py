@@ -1,8 +1,8 @@
-"""Regression test for the panel on/off toggle design
-(docs/superpowers/specs/2026-07-16-moonlighter-on-off-toggle-design.md).
+"""Regression tests for stopping an in-flight run when Moonlighter is
+switched off.
 
 The supervisor loop in lib/runner.py already breaks out on wall-clock and
-budget stops by setting `stop_reason`, calling `_budget_stop()`, and
+budget stops by setting `stop_reason`, calling `_graceful_stop()`, and
 breaking. This adds the kill-switch file as one more stop condition, using
 the exact same break path so an interrupted run still gets revert.sh, the
 report, and the notify step.
@@ -33,8 +33,8 @@ def run_dir(tmp_path):
 
 def test_kill_switch_created_mid_run_stops_the_loop(run_dir, monkeypatch):
     """Creating the kill-switch file mid-run must set the switched-off
-    stop_reason, invoke _budget_stop() (the same graceful-stop helper the
-    wall-clock/budget stops use), and break out of the loop."""
+    stop_reason, invoke _graceful_stop() (the same helper the wall-clock and
+    budget stops use) with the real reason, and break out of the loop."""
     kill_switch = run_dir / "pause"
     cfg = {"kill_switch_path": kill_switch}
 
@@ -56,7 +56,7 @@ def test_kill_switch_created_mid_run_stops_the_loop(run_dir, monkeypatch):
 
     budget_stop_calls = []
     monkeypatch.setattr(runner, "_session_alive", fake_session_alive)
-    monkeypatch.setattr(runner, "_budget_stop", lambda: budget_stop_calls.append(1))
+    monkeypatch.setattr(runner, "_graceful_stop", lambda why=None: budget_stop_calls.append(why))
 
     hard_deadline = datetime.datetime.now() + datetime.timedelta(hours=1)
     stop_reason = runner._supervise(
@@ -65,7 +65,10 @@ def test_kill_switch_created_mid_run_stops_the_loop(run_dir, monkeypatch):
     )
 
     assert stop_reason == "switched off from panel"
-    assert budget_stop_calls == [1], "must call _budget_stop() to gracefully wind down the session"
+    assert budget_stop_calls == ["Switched off from the panel"], (
+        "must call _graceful_stop() to wind the session down, and must tell it the real "
+        "reason — a switch-off is not a budget stop"
+    )
     assert not summary_path.exists(), "loop breaks promptly, without waiting for a session-authored summary"
 
 
