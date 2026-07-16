@@ -364,6 +364,11 @@ def _process_scheduled(cfg):
             schedule.update(tid, status=schedule.STATUS_MISSED, note=note)
             continue
 
+        claimed = schedule.claim(tid)
+        if claimed is None:
+            continue
+        task = claimed
+
         state.ensure_dirs()
         mission = schedule.build_mission(task)
         mission_file = state.STATE_DIR / f"scheduled-mission-{tid}.md"
@@ -378,10 +383,17 @@ def _process_scheduled(cfg):
             env["ML_FIVE_TARGET"] = str(task["five_target"])
 
         run_sh = cfg["_project_dir"] / "run.sh"
-        subprocess.Popen(["bash", str(run_sh)], env=env,
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
-        schedule.update(tid, status=schedule.STATUS_FIRED, fired_at=state.now_iso())
+        try:
+            subprocess.Popen(["bash", str(run_sh)], env=env,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+        except OSError as exc:
+            schedule.transition(tid, schedule.STATUS_LAUNCHING,
+                                status=schedule.STATUS_MISSED,
+                                note=f"launch failed: {exc}")
+            continue
+        schedule.transition(tid, schedule.STATUS_LAUNCHING,
+                            status=schedule.STATUS_FIRED, fired_at=state.now_iso())
         state.gate_log(f"scheduled task {tid} fired -> {mission_file.name}")
         fired = True
 

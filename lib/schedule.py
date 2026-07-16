@@ -10,16 +10,20 @@ file yields an empty list. A scheduler that crashes the gate would take the whol
 nightly system down with it.
 """
 import datetime
+import contextlib
+import fcntl
 import json
 import pathlib
 import secrets
 import sys
+import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import state  # noqa: E402
 
 STATUS_PENDING = "pending"
+STATUS_LAUNCHING = "launching"
 STATUS_FIRED = "fired"
 STATUS_MISSED = "missed"
 STATUS_CANCELLED = "cancelled"
@@ -29,8 +33,21 @@ def _path():
     return state.STATE_DIR / "scheduled.json"
 
 
-def load():
-    """Every task, newest first. Never raises — cron depends on this."""
+@contextlib.contextmanager
+def _lock():
+    """Serialize queue mutations across the panel and cron gate."""
+    p = _path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = p.with_suffix(".json.lock")
+    with lock_path.open("a+", encoding="utf-8") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def _load_unlocked():
     p = _path()
     if not p.exists():
         return []
@@ -45,13 +62,31 @@ def load():
     return [t for t in data if isinstance(t, dict)]
 
 
-def save(tasks):
-    """Write atomically — the gate may read this file mid-write."""
+def load():
+    """Every task, newest first. Never raises — cron depends on this."""
+    return _load_unlocked()
+
+
+def _save_unlocked(tasks):
     p = _path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(tasks, indent=2), encoding="utf-8")
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=p.parent,
+        prefix=f".{p.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as fh:
+        json.dump(tasks, fh, indent=2)
+        tmp = pathlib.Path(fh.name)
     tmp.replace(p)
+
+
+def save(tasks):
+    """Write atomically — the gate may read this file mid-write."""
+    with _lock():
+        _save_unlocked(tasks)
 
 
 def new_id(run_at):
@@ -60,9 +95,10 @@ def new_id(run_at):
 
 
 def add(task):
-    tasks = load()
-    tasks.insert(0, task)
-    save(tasks)
+    with _lock():
+        tasks = _load_unlocked()
+        tasks.insert(0, task)
+        _save_unlocked(tasks)
     return task
 
 
@@ -74,24 +110,44 @@ def get(task_id):
 
 
 def update(task_id, **fields):
-    tasks = load()
-    hit = None
-    for t in tasks:
-        if t.get("id") == task_id:
-            t.update(fields)
-            hit = t
-            break
-    if hit is not None:
-        save(tasks)
-    return hit
+    with _lock():
+        tasks = _load_unlocked()
+        hit = None
+        for t in tasks:
+            if t.get("id") == task_id:
+                t.update(fields)
+                hit = t
+                break
+        if hit is not None:
+            _save_unlocked(tasks)
+        return hit
+
+
+def transition(task_id, from_status, **fields):
+    """Conditionally update a task only if it is still in from_status."""
+    with _lock():
+        tasks = _load_unlocked()
+        hit = None
+        for t in tasks:
+            if t.get("id") == task_id:
+                if t.get("status") != from_status:
+                    return None
+                t.update(fields)
+                hit = t
+                break
+        if hit is not None:
+            _save_unlocked(tasks)
+        return hit
+
+
+def claim(task_id):
+    """Claim a pending task for launch; returns None if another process won."""
+    return transition(task_id, STATUS_PENDING, status=STATUS_LAUNCHING)
 
 
 def cancel(task_id):
     """Only a pending task can be cancelled — never rewrite history."""
-    t = get(task_id)
-    if t is None or t.get("status") != STATUS_PENDING:
-        return None
-    return update(task_id, status=STATUS_CANCELLED)
+    return transition(task_id, STATUS_PENDING, status=STATUS_CANCELLED)
 
 
 def due(now=None):

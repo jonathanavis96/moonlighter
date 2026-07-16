@@ -123,6 +123,30 @@ def test_cancel_returns_none_for_already_fired_task(sched_path):
     assert schedule.get(task["id"])["status"] == schedule.STATUS_FIRED
 
 
+
+def test_claim_only_transitions_pending_tasks(sched_path):
+    now = datetime.datetime.now().astimezone()
+    task = _task(now - datetime.timedelta(minutes=1))
+    schedule.save([task])
+
+    claimed = schedule.claim(task["id"])
+    second_claim = schedule.claim(task["id"])
+
+    assert claimed["status"] == schedule.STATUS_LAUNCHING
+    assert second_claim is None
+    assert schedule.get(task["id"])["status"] == schedule.STATUS_LAUNCHING
+
+
+def test_cancel_cannot_restore_claimed_task_to_pending(sched_path):
+    now = datetime.datetime.now().astimezone()
+    task = _task(now - datetime.timedelta(minutes=1))
+    schedule.save([task])
+
+    assert schedule.claim(task["id"]) is not None
+    assert schedule.cancel(task["id"]) is None
+
+    assert schedule.get(task["id"])["status"] == schedule.STATUS_LAUNCHING
+
 def test_build_mission_contains_prompt_folder_and_doc_paths():
     task = {
         "prompt": "Work through this repo and fix security patching",

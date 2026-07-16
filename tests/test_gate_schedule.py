@@ -165,6 +165,49 @@ def test_remaining_due_tasks_stay_pending_after_one_launch(env):
     assert schedule.get(second["id"])["status"] == schedule.STATUS_PENDING
     assert schedule.get(second["id"])["note"] is None
 
+
+def test_due_task_missed_when_launch_fails(env, monkeypatch):
+    cfg, popen_calls = env
+
+    def fail_popen(*args, **kwargs):
+        popen_calls.append({"args": args, "kwargs": kwargs})
+        raise OSError("boom")
+
+    monkeypatch.setattr(gate.subprocess, "Popen", fail_popen)
+    now = datetime.datetime.now().astimezone()
+    task = _task(now - datetime.timedelta(minutes=5))
+    schedule.save([task])
+
+    fired = gate._process_scheduled(cfg)
+
+    assert fired is False
+    assert len(popen_calls) == 1
+    updated = schedule.get(task["id"])
+    assert updated["status"] == schedule.STATUS_MISSED
+    assert "launch failed" in updated["note"]
+
+
+def test_due_task_not_launched_if_cancelled_before_claim(env, monkeypatch):
+    cfg, popen_calls = env
+
+    now = datetime.datetime.now().astimezone()
+    task = _task(now - datetime.timedelta(minutes=5))
+    schedule.save([task])
+
+    real_claim = schedule.claim
+
+    def cancel_then_claim(task_id):
+        schedule.cancel(task_id)
+        return real_claim(task_id)
+
+    monkeypatch.setattr(schedule, "claim", cancel_then_claim)
+
+    fired = gate._process_scheduled(cfg)
+
+    assert fired is False
+    assert popen_calls == []
+    assert schedule.get(task["id"])["status"] == schedule.STATUS_CANCELLED
+
 def test_future_task_left_pending_and_not_launched(env):
     cfg, popen_calls = env
 
