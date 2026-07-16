@@ -464,6 +464,17 @@ def _supervise(cfg, run_dir, summary_path, hard_deadline, bucket, five_target, w
 def main():
     cfg = cfgmod.load()
     state.ensure_dirs()
+    # Switched off wins over every launch path. The supervisor also checks this, but
+    # only once the tmux session exists and the mission has been sent — by then the
+    # agent can already have spent quota and acted. Refuse before launching anything.
+    # This is the only gate `run.sh` passes through: `moonlight start` and /api/start
+    # check the kill switch themselves, but /api/apply and one-off env-override
+    # launchers invoke run.sh directly and would otherwise bypass OFF entirely.
+    if cfg["kill_switch_path"].exists():
+        print("Moonlighter is switched off. Turn it on from the panel "
+              "or run `moonlight resume` first.")
+        state.gate_log("runner: refused to launch — switched off (kill switch present)")
+        return 1
     if not shutil.which("tmux"):
         print("Moonlighter's autonomous engine needs `tmux` (a real, capturable Claude session).\n"
               "  • Linux/macOS:  install tmux (apt/brew install tmux), then retry.\n"

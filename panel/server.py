@@ -2630,7 +2630,13 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
                     if len(tasks) > CAP:
                         dropped = len(tasks) - CAP
                         tasks = tasks[:CAP]
-                    if tasks:
+                    if tasks and CFG["kill_switch_path"].exists():
+                        # Switched off must refuse the launch up front, the same way
+                        # /api/start does — not spawn an agent that acts until the
+                        # supervisor's first tick notices and stops it.
+                        msgs.append("Moonlighter is switched off — turn it on to run "
+                                    "approved items. Your approvals were saved.")
+                    elif tasks:
                         tf = state.STATE_DIR / "apply_tasks.txt"
                         tf.write_text("\n\x1e".join(tasks), encoding="utf-8")
                         env = dict(os.environ)
