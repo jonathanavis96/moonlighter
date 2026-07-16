@@ -54,9 +54,9 @@ def _verdict_class(verdict: str) -> str:
 def _pwr_toggle_html(paused: bool, active_run: bool) -> str:
     """The ON/OFF power toggle button, server-rendered with its initial state.
 
-    Shared across every panel page (main, run, night) — see docs/superpowers/specs/
-    2026-07-16-moonlighter-on-off-toggle-design.md. State is a single boolean, `paused`,
-    derived from kill-switch file existence (never string-matched from a check name).
+    Shared across every panel page (main, run, night). State is a single boolean,
+    `paused`, derived from kill-switch file existence (never string-matched from a
+    check name).
     """
     cls = "pwrtoggle off" if paused else "pwrtoggle on"
     label = "OFF" if paused else "ON"
@@ -111,7 +111,10 @@ async function pwrPoll() {
   try {
     const r = await fetch('/api/status');
     const s = await r.json();
-    pwrRender(!!s.paused, !!s.active_run);
+    // A degraded response must never read as "running": absent `paused` is unknown,
+    // not false. Keep the last known state rather than flipping the toggle to ON.
+    if (typeof s.paused !== 'boolean') return;
+    pwrRender(s.paused, !!s.active_run);
   } catch (e) {}
 }
 document.addEventListener('DOMContentLoaded', () => {
@@ -371,8 +374,9 @@ function renderStatus(s) {{
   if (!s) return;
   LAST_STATUS = s;
   // The power toggle reflects the kill-switch file, independent of the usage API —
-  // update it even when there's no live usage data to show.
-  pwrRender(!!s.paused, !!s.active_run);
+  // update it even when there's no live usage data to show. But absent `paused` is
+  // unknown, not false: keep the last known state rather than reading as ON.
+  if (typeof s.paused === 'boolean') pwrRender(s.paused, !!s.active_run);
   if (s.live === false) {{
     el('mode-line').textContent = '● no live data';
     ['five-huge','week-huge'].forEach(id => el(id).textContent = '--');
@@ -693,7 +697,13 @@ document.addEventListener('DOMContentLoaded', () => {{
     html = html.replace(
         '<button class="pwrtoggle on" id="pwr-toggle" data-paused="0" data-active-run="0">'
         '<span class="pwrdot"></span>ON</button>',
-        _pwr_toggle_html(status.get("paused", False), status.get("active_run") is not None),
+        _pwr_toggle_html(
+            # If status is degraded and carries no `paused`, read the kill-switch file
+            # rather than defaulting to False — an unknown state must not render as ON.
+            status["paused"] if isinstance(status.get("paused"), bool)
+            else cfg["kill_switch_path"].exists(),
+            status.get("active_run") is not None,
+        ),
         1)
 
     # 2. Five-hour huge number
