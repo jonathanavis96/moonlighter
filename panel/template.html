@@ -47,6 +47,20 @@ h1{font-family:'Fraunces',serif;font-weight:300;font-size:32px;letter-spacing:.0
 h1 em{font-style:italic;color:var(--gold)}
 .mode{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.28em;text-align:right;line-height:1.9}
 .mode b{color:var(--blue);font-weight:400}
+/* ---------- power toggle (header, every page) ---------- */
+.hdrright{display:flex;align-items:center;gap:20px}
+.pwrtoggle{display:inline-flex;align-items:center;gap:8px;font-family:'IBM Plex Mono',monospace;
+  font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;padding:9px 16px;
+  background:transparent;border:1px solid var(--line);color:var(--dim);cursor:pointer;
+  transition:all .25s;flex:none}
+.pwrtoggle:hover{border-color:var(--dim);background:rgba(214,225,255,.05)}
+.pwrtoggle .pwrdot{width:7px;height:7px;border-radius:50%;background:var(--dim);flex:none}
+.pwrtoggle.on{border-color:rgba(168,212,154,.5);color:var(--ok)}
+.pwrtoggle.on .pwrdot{background:var(--ok);box-shadow:0 0 8px rgba(168,212,154,.65)}
+.pwrtoggle.on:hover{border-color:var(--ok);background:rgba(168,212,154,.08)}
+.pwrtoggle.off{border-color:rgba(232,134,108,.5);color:var(--fail)}
+.pwrtoggle.off .pwrdot{background:var(--fail)}
+.pwrtoggle.off:hover{border-color:var(--fail);background:rgba(232,134,108,.08)}
 .label{font-size:10.5px;letter-spacing:.28em;text-transform:uppercase;color:var(--dim);margin-bottom:16px}
 /* ---------- hero ---------- */
 .hero{display:grid;grid-template-columns:1fr 1fr 1.45fr;gap:34px;align-items:stretch}
@@ -118,6 +132,8 @@ footer{margin-top:60px;text-align:center;color:var(--dim);font-size:10px;letter-
   h1{font-size:24px}
   .crescent{width:32px;height:32px}
   .mode{display:none}
+  .hdrright{gap:0}
+  .pwrtoggle{padding:8px 12px;font-size:9.5px;letter-spacing:.14em}
   .hero{grid-template-columns:1fr 1fr;gap:0 22px}
   .stat .huge{font-size:clamp(64px,21vw,84px)}
   .graphpanel{grid-column:1/-1;margin-top:26px}
@@ -149,7 +165,10 @@ footer{margin-top:60px;text-align:center;color:var(--dim);font-size:10px;letter-
       <div class="crescent"></div>
       <h1>Moon<em>lighter</em></h1>
     </div>
-    <div class="mode">Observe mode · night 0<br><b>next window&nbsp; 02:00 – 05:30</b></div>
+    <div class="hdrright">
+      <button class="pwrtoggle on" id="pwr-toggle" data-paused="0" data-active-run="0"><span class="pwrdot"></span>ON</button>
+      <div class="mode">Observe mode · night 0<br><b>next window&nbsp; 02:00 – 05:30</b></div>
+    </div>
   </header>
 
   <section class="hero">

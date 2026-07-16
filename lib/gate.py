@@ -227,6 +227,7 @@ def compute_status(cfg=None, manual_away_hours=None):
         "ts": state.now_iso(),
         "mode": cfg.get("mode", "observe"),
         "approved": state.APPROVED_FLAG.exists() or cfg.get("mode") == "full-auto",
+        "paused": kill,
         "phone_tier": cfg.get("phone_tier", "lan"),
         "live": usage is not None,
         "usage_error": uerr,

@@ -2,6 +2,7 @@
   "ts": "2026-06-13T00:48:10.996515+02:00",
   "mode": "observe",
   "approved": false,
+  "paused": false,
   "phone_tier": "ntfy",
   "live": true,
   "usage_error": null,
