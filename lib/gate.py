@@ -337,7 +337,10 @@ def _process_scheduled(cfg):
             schedule.update(tid, status=schedule.STATUS_MISSED, note="switched off")
             continue
 
-        if fired or run_in_flight():
+        if fired:
+            break
+
+        if run_in_flight():
             schedule.update(tid, status=schedule.STATUS_MISSED,
                              note="a run was already in flight")
             continue

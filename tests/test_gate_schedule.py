@@ -149,6 +149,22 @@ def test_due_task_passes_sonnet_active_bucket(env):
     assert popen_calls[0]["env"]["ML_ACTIVE_BUCKET"] == "seven_day_sonnet"
 
 
+def test_remaining_due_tasks_stay_pending_after_one_launch(env):
+    cfg, popen_calls = env
+
+    now = datetime.datetime.now().astimezone()
+    first = _task(now - datetime.timedelta(minutes=10), id="first")
+    second = _task(now - datetime.timedelta(minutes=5), id="second")
+    schedule.save([second, first])
+
+    fired = gate._process_scheduled(cfg)
+
+    assert fired is True
+    assert len(popen_calls) == 1
+    assert schedule.get(first["id"])["status"] == schedule.STATUS_FIRED
+    assert schedule.get(second["id"])["status"] == schedule.STATUS_PENDING
+    assert schedule.get(second["id"])["note"] is None
+
 def test_future_task_left_pending_and_not_launched(env):
     cfg, popen_calls = env
 
