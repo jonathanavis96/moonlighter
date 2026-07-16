@@ -20,6 +20,7 @@ import history               # noqa: E402
 import budget as budgetmod   # noqa: E402
 import usage_api             # noqa: E402
 import graph as graphmod     # noqa: E402
+import schedule              # noqa: E402
 
 TMUX_SESSION = "moonlighter"
 
@@ -318,12 +319,70 @@ def _runs_for_panel(limit=8):
     return out
 
 
+def _process_scheduled(cfg):
+    """Fire at most one due scheduled task.
+
+    A scheduled task named a specific time, so unlike the nightly job it skips
+    the idle-window and recent-activity checks below — it still refuses when
+    Moonlighter is switched OFF, and the runner still enforces the wallclock/5h
+    caps via the env overrides passed here.
+
+    Returns True if a task was launched this tick, so main() can skip its own
+    GO launch below and avoid firing two runs in the same tick (a race with
+    run_in_flight(), which only sees a session once run.sh actually starts one).
+    """
+    fired = False
+    for task in schedule.due():
+        tid = task.get("id")
+
+        if cfg["kill_switch_path"].exists():
+            schedule.update(tid, status=schedule.STATUS_MISSED, note="switched off")
+            continue
+
+        if fired or run_in_flight():
+            schedule.update(tid, status=schedule.STATUS_MISSED,
+                             note="a run was already in flight")
+            continue
+
+        state.ensure_dirs()
+        mission = schedule.build_mission(task)
+        mission_file = state.STATE_DIR / f"scheduled-mission-{tid}.md"
+        mission_file.write_text(mission, encoding="utf-8")
+
+        env = dict(os.environ)
+        env["ML_MISSION_FILE"] = str(mission_file)
+        if task.get("wallclock_min"):
+            env["ML_WALLCLOCK_MIN"] = str(task["wallclock_min"])
+        if task.get("five_target"):
+            env["ML_FIVE_TARGET"] = str(task["five_target"])
+
+        run_sh = cfg["_project_dir"] / "run.sh"
+        subprocess.Popen(["bash", str(run_sh)], env=env,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+        schedule.update(tid, status=schedule.STATUS_FIRED, fired_at=state.now_iso())
+        state.gate_log(f"scheduled task {tid} fired -> {mission_file.name}")
+        fired = True
+
+    return fired
+
+
 def main():
     """Cron entry. Compute status; launch the runner if the verdict is GO."""
     cfg = cfgmod.load()
     usage_now, _ = gather_usage()
     if usage_now is not None:
         state.append_usage_sample(usage_now)  # learn the weekly curve
+
+    # Scheduled tasks are handled first and wrapped in isolation: a bug in the
+    # scheduler must never take down the nightly gate below. A task fired here
+    # already used this tick's single launch slot.
+    scheduled_fired = False
+    try:
+        scheduled_fired = _process_scheduled(cfg)
+    except Exception as exc:
+        state.gate_log(f"scheduler error: {exc}")
+
     status = compute_status(cfg)
     verdict = status["gate"]["verdict"]
     bud = status["gate"]["budget"]
@@ -332,7 +391,7 @@ def main():
             f"five_room={bud['five_room'] if bud else '—'}%")
     state.gate_log(line)
 
-    if verdict != "GO":
+    if verdict != "GO" or scheduled_fired:
         return 0
 
     # GO — launch the runner (run.sh decides dry-run vs act from config mode; the
