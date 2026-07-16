@@ -382,7 +382,18 @@ def _read_budget_env(cfg):
     bucket = os.environ.get("ML_ACTIVE_BUCKET", "seven_day")
     away = os.environ.get("ML_AWAY_HOURS")
     away = float(away) if away else None
-    return bucket, away
+    wallclock = os.environ.get("ML_WALLCLOCK_MIN")
+    wallclock = int(wallclock) if wallclock else None
+    five_target = os.environ.get("ML_FIVE_TARGET")
+    five_target = float(five_target) if five_target else None
+    return bucket, away, wallclock, five_target
+
+
+def _read_mission_file_env():
+    mission_file = os.environ.get("ML_MISSION_FILE")
+    if not mission_file:
+        return None
+    return pathlib.Path(mission_file).read_text(encoding="utf-8")
 
 
 def _supervise(cfg, run_dir, summary_path, hard_deadline, bucket, five_target, weekly_cap):
@@ -487,10 +498,14 @@ def main():
         return 1
 
     dry_run = cfg.get("mode", "observe") != "full-auto"
-    bucket, away_hours = _read_budget_env(cfg)
+    bucket, away_hours, wallclock_override, five_target_override = _read_budget_env(cfg)
     wallclock_min = int(cfg.get("max_wallclock_min", 360))
+    if wallclock_override is not None:
+        wallclock_min = wallclock_override
     night_model = cfg.get("night_model", "default")
     five_target = float(cfg.get("five_hour_target_pct", 80))
+    if five_target_override is not None:
+        five_target = five_target_override
     reserve = float(cfg.get("weekly_reserve_pct", 10))
     weekly_cap = 100.0 - reserve
 
@@ -509,12 +524,15 @@ def main():
     started = datetime.datetime.now()
     started_ts = started.timestamp()
 
+    mission_override = _read_mission_file_env()
     apply_file = os.environ.get("ML_APPLY_TASKS")
     apply_mode = bool(apply_file and pathlib.Path(apply_file).exists())
     if apply_mode:
         dry_run = False  # applying approved items always acts
         tasks = [t for t in pathlib.Path(apply_file).read_text(encoding="utf-8").split("\n\x1e") if t.strip()]
         mission = build_apply_mission(cfg, run_dir, tasks)
+    elif mission_override is not None:
+        mission = mission_override
     else:
         try:
             prior = digestmod.prior_brief()   # what earlier runs tonight already covered
