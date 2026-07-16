@@ -385,6 +385,82 @@ def _read_budget_env(cfg):
     return bucket, away
 
 
+def _supervise(cfg, run_dir, summary_path, hard_deadline, bucket, five_target, weekly_cap):
+    """Wait loop that supervises the live tmux session until it should stop.
+
+    Returns the stop_reason string. Extracted from main() so it can be driven
+    directly in tests without a real tmux session.
+    """
+    stop_reason = "completed"
+    prev_pane = None
+    idle = 0
+    last_budget_check = time.time()
+
+    while True:
+        if not _session_alive():
+            stop_reason = "session ended"
+            break
+        if summary_path.exists() and summary_path.stat().st_size > 0:
+            # session signalled completion; give it a moment then finish
+            time.sleep(5)
+            stop_reason = "completed"
+            break
+
+        # If the agent is waiting on a clarifying question, it's legitimately paused —
+        # don't count idle / nudge / kill until the user answers (or ml_ask times out).
+        if (run_dir / "ask.json").exists():
+            idle = 0
+            prev_pane = None
+        else:
+            pane = _capture()
+            if pane == prev_pane:
+                idle += 1
+            else:
+                idle = 0
+                prev_pane = pane
+            if idle >= IDLE_CONFIRMATIONS:
+                if idle == IDLE_CONFIRMATIONS:
+                    subprocess.run(["tmux", "send-keys", "-t", TMUX,
+                                    "If you are done, write $ML_RUN_DIR/summary.md now and stop.",
+                                    "Enter"])
+                if idle >= IDLE_CONFIRMATIONS * 3:
+                    stop_reason = "idle"
+                    break
+
+        # Switched off from the panel/CLI/ntfy bridge — check every iteration (not
+        # gated behind BUDGET_CHECK_SEC) so "off" takes effect promptly.
+        if cfg["kill_switch_path"].exists():
+            stop_reason = "switched off from panel"
+            _budget_stop()
+            break
+
+        now = time.time()
+        if datetime.datetime.now() >= hard_deadline:
+            stop_reason = "wall-clock cap"
+            _budget_stop()
+            break
+        if now - last_budget_check >= BUDGET_CHECK_SEC:
+            last_budget_check = now
+            try:
+                un = usage_api.get_usage(force=True)  # real reading for the safety stop
+                five = float((un.get("five_hour") or {}).get("utilization") or 0.0)
+                cur = float((un.get(bucket) or {}).get("utilization") or 0.0)
+                # Spare-capacity stops: 5h window filled to target, or weekly reserve reached.
+                if five >= five_target:
+                    stop_reason = f"5h window filled to target ({five:.0f}% ≥ {five_target:.0f}%)"
+                    _budget_stop()
+                    break
+                if cur >= weekly_cap:
+                    stop_reason = f"weekly reserve reached ({cur:.0f}% ≥ {weekly_cap:.0f}%)"
+                    _budget_stop()
+                    break
+            except Exception:
+                pass
+        time.sleep(POLL)
+
+    return stop_reason
+
+
 def main():
     cfg = cfgmod.load()
     state.ensure_dirs()
@@ -492,67 +568,10 @@ def main():
     subprocess.run(["tmux", "send-keys", "-t", TMUX, "Enter"])
 
     # --- supervise ---
-    stop_reason = "completed"
-    prev_pane = None
-    idle = 0
-    last_budget_check = time.time()
     hard_deadline = started + datetime.timedelta(minutes=wallclock_min)
     summary_path = run_dir / "summary.md"
-
-    while True:
-        if not _session_alive():
-            stop_reason = "session ended"
-            break
-        if summary_path.exists() and summary_path.stat().st_size > 0:
-            # session signalled completion; give it a moment then finish
-            time.sleep(5)
-            stop_reason = "completed"
-            break
-
-        # If the agent is waiting on a clarifying question, it's legitimately paused —
-        # don't count idle / nudge / kill until the user answers (or ml_ask times out).
-        if (run_dir / "ask.json").exists():
-            idle = 0
-            prev_pane = None
-        else:
-            pane = _capture()
-            if pane == prev_pane:
-                idle += 1
-            else:
-                idle = 0
-                prev_pane = pane
-            if idle >= IDLE_CONFIRMATIONS:
-                if idle == IDLE_CONFIRMATIONS:
-                    subprocess.run(["tmux", "send-keys", "-t", TMUX,
-                                    "If you are done, write $ML_RUN_DIR/summary.md now and stop.",
-                                    "Enter"])
-                if idle >= IDLE_CONFIRMATIONS * 3:
-                    stop_reason = "idle"
-                    break
-
-        now = time.time()
-        if datetime.datetime.now() >= hard_deadline:
-            stop_reason = "wall-clock cap"
-            _budget_stop()
-            break
-        if now - last_budget_check >= BUDGET_CHECK_SEC:
-            last_budget_check = now
-            try:
-                un = usage_api.get_usage(force=True)  # real reading for the safety stop
-                five = float((un.get("five_hour") or {}).get("utilization") or 0.0)
-                cur = float((un.get(bucket) or {}).get("utilization") or 0.0)
-                # Spare-capacity stops: 5h window filled to target, or weekly reserve reached.
-                if five >= five_target:
-                    stop_reason = f"5h window filled to target ({five:.0f}% ≥ {five_target:.0f}%)"
-                    _budget_stop()
-                    break
-                if cur >= weekly_cap:
-                    stop_reason = f"weekly reserve reached ({cur:.0f}% ≥ {weekly_cap:.0f}%)"
-                    _budget_stop()
-                    break
-            except Exception:
-                pass
-        time.sleep(POLL)
+    stop_reason = _supervise(cfg, run_dir, summary_path, hard_deadline, bucket,
+                              five_target, weekly_cap)
 
     # --- wrap up ---
     finished = datetime.datetime.now()

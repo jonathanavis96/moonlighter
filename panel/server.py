@@ -51,6 +51,78 @@ def _verdict_class(verdict: str) -> str:
             "HOLD": "hold"}.get(verdict, "hold")
 
 
+def _pwr_toggle_html(paused: bool, active_run: bool) -> str:
+    """The ON/OFF power toggle button, server-rendered with its initial state.
+
+    Shared across every panel page (main, run, night) — see docs/superpowers/specs/
+    2026-07-16-moonlighter-on-off-toggle-design.md. State is a single boolean, `paused`,
+    derived from kill-switch file existence (never string-matched from a check name).
+    """
+    cls = "pwrtoggle off" if paused else "pwrtoggle on"
+    label = "OFF" if paused else "ON"
+    return (
+        f'<button class="{cls}" id="pwr-toggle" '
+        f'data-paused="{"1" if paused else "0"}" '
+        f'data-active-run="{"1" if active_run else "0"}">'
+        f'<span class="pwrdot"></span>{label}</button>'
+    )
+
+
+def _pwr_toggle_script() -> str:
+    """Standalone power-toggle wiring for pages that don't share the main dashboard's
+    big script (run page, night page): click handler + a 20s /api/status poll so the
+    toggle stays state-reflecting even if `paused` changed elsewhere (CLI, ntfy bridge,
+    another tab) while this page was open."""
+    return """
+<script>
+function pwrRender(paused, activeRun) {
+  const btn = document.getElementById('pwr-toggle');
+  if (!btn) return;
+  btn.dataset.paused = paused ? '1' : '0';
+  btn.dataset.activeRun = activeRun ? '1' : '0';
+  btn.className = 'pwrtoggle ' + (paused ? 'off' : 'on');
+  btn.innerHTML = '<span class="pwrdot"></span>' + (paused ? 'OFF' : 'ON');
+}
+async function pwrPost(url, body) {
+  try {
+    const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                 body: JSON.stringify(body || {})});
+    const data = await r.json();
+    if (!r.ok || !data.ok) { alert('Error: ' + (data.error || r.status)); return false; }
+    return true;
+  } catch (e) { alert('Request failed: ' + e); return false; }
+}
+async function pwrToggleClick() {
+  const btn = document.getElementById('pwr-toggle');
+  if (!btn) return;
+  if (btn.dataset.paused === '1') {
+    const pin = prompt('Enter 6-digit PIN:');
+    if (!pin) return;
+    if (await pwrPost('/api/resume', {pin})) pwrRender(false, btn.dataset.activeRun === '1');
+  } else {
+    const msg = btn.dataset.activeRun === '1'
+      ? 'Switch Moonlighter off? This will stop the run in progress.'
+      : 'Switch Moonlighter off?';
+    if (!confirm(msg)) return;
+    if (await pwrPost('/api/pause', {})) pwrRender(true, false);
+  }
+}
+async function pwrPoll() {
+  try {
+    const r = await fetch('/api/status');
+    const s = await r.json();
+    pwrRender(!!s.paused, !!s.active_run);
+  } catch (e) {}
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('pwr-toggle');
+  if (btn) btn.addEventListener('click', pwrToggleClick);
+  setInterval(pwrPoll, 20000);
+});
+</script>
+"""
+
+
 def _human_tokens(n) -> str:
     n = int(n or 0)
     if n >= 1_000_000:
@@ -219,6 +291,7 @@ def _build_panel_html(status: dict, cfg: dict) -> str:
 const INITIAL_STATUS = {status_json};
 const HAS_DRY_RUN = {"true" if has_dry_run else "false"};
 const APPROVED = {"true" if approved else "false"};
+let LAST_STATUS = INITIAL_STATUS;
 
 // ---- DOM helpers ----
 function el(id) {{ return document.getElementById(id); }}
@@ -238,6 +311,16 @@ function humTok(n) {{
 function verdictClass(v) {{
   const m = {{OK:'ok',GO:'ok',FAIL:'fail',SKIP:'fail',HOLD:'hold'}};
   return m[v] || 'hold';
+}}
+
+// ---- Power toggle (header) ----
+function pwrRender(paused, activeRun) {{
+  const btn = el('pwr-toggle');
+  if (!btn) return;
+  btn.dataset.paused = paused ? '1' : '0';
+  btn.dataset.activeRun = activeRun ? '1' : '0';
+  btn.className = 'pwrtoggle ' + (paused ? 'off' : 'on');
+  btn.innerHTML = '<span class="pwrdot"></span>' + (paused ? 'OFF' : 'ON');
 }}
 
 // ---- Live run-in-progress card ----
@@ -285,7 +368,12 @@ function showRunCard(ar) {{
 
 // ---- Render functions ----
 function renderStatus(s) {{
-  if (!s || s.live === false) {{
+  if (!s) return;
+  LAST_STATUS = s;
+  // The power toggle reflects the kill-switch file, independent of the usage API —
+  // update it even when there's no live usage data to show.
+  pwrRender(!!s.paused, !!s.active_run);
+  if (s.live === false) {{
     el('mode-line').textContent = '● no live data';
     ['five-huge','week-huge'].forEach(id => el(id).textContent = '--');
     return;
@@ -462,10 +550,15 @@ async function doStart() {{
 }}
 
 async function doPause() {{
-  const pin = pinPrompt();
-  if (!pin) return;
-  const ok = await postAction('/api/pause', {{pin}});
-  if (ok) {{ alert('Paused.'); refreshStatus(); }}
+  // No PIN — off is the fail-safe direction (design doc "Accepted risk"). Warn first
+  // if it will stop a run in progress; otherwise just confirm the switch.
+  const activeRun = LAST_STATUS && !!LAST_STATUS.active_run;
+  const msg = activeRun
+    ? 'Switch Moonlighter off? This will stop the run in progress.'
+    : 'Switch Moonlighter off?';
+  if (!confirm(msg)) return;
+  const ok = await postAction('/api/pause', {{}});
+  if (ok) {{ refreshStatus(); }}
 }}
 
 async function doResume() {{
@@ -512,9 +605,11 @@ document.addEventListener('DOMContentLoaded', () => {{
 
   // Desktop start buttons
   document.querySelectorAll('.btn-start').forEach(b => b.addEventListener('click', doStart));
-  // Desktop pause button
-  const pauseBtn = el('btn-pause');
-  if (pauseBtn) pauseBtn.addEventListener('click', doPause);
+  // Power toggle (header, works for desktop + mobile — one control, always visible)
+  const pwrBtn = el('pwr-toggle');
+  if (pwrBtn) pwrBtn.addEventListener('click', () => {{
+    if (pwrBtn.dataset.paused === '1') doResume(); else doPause();
+  }});
   // Mode toggle buttons (desktop + mobile)
   const modeBtn = el('btn-mode');
   if (modeBtn) modeBtn.addEventListener('click', doToggleMode);
@@ -540,8 +635,6 @@ document.addEventListener('DOMContentLoaded', () => {{
   }});
   // Mobile start
   document.querySelectorAll('.btn-mobile-start').forEach(b => b.addEventListener('click', doStart));
-  // Mobile pause
-  document.querySelectorAll('.btn-mobile-pause').forEach(b => b.addEventListener('click', doPause));
 
   // Heatmap tap/click → readout (delegated, survives refresh re-renders)
   const grid = el('heat-grid');
@@ -595,6 +688,13 @@ document.addEventListener('DOMContentLoaded', () => {{
         f'<b>next check&nbsp; {next_check}</b></div>'
     )
     html = html.replace(old_mode, new_mode, 1)
+
+    # 1b. Power toggle (header, every page) — reflects the kill-switch file directly
+    html = html.replace(
+        '<button class="pwrtoggle on" id="pwr-toggle" data-paused="0" data-active-run="0">'
+        '<span class="pwrdot"></span>ON</button>',
+        _pwr_toggle_html(status.get("paused", False), status.get("active_run") is not None),
+        1)
 
     # 2. Five-hour huge number
     old_five_huge = '<div class="huge">71<small>%</small></div>'
@@ -667,11 +767,12 @@ document.addEventListener('DOMContentLoaded', () => {{
   </div>'''
     cur_mode = status.get("mode", "observe")
     mode_label = "Switch to Review" if cur_mode == "full-auto" else "Switch to Full-auto"
+    # Pause used to live here as a dead-end button (wired to doPause, no doResume anywhere).
+    # It's replaced by the header power toggle (on/off, state-reflecting, every page).
     new_actions = (
         f'  <div class="actions">\n'
         f'    <button class="btn primary btn-start">Start now</button>\n'
         f'    <div class="hours">away for <span class="pill">5 h</span></div>\n'
-        f'    <button class="btn ghost" id="btn-pause">Pause</button>\n'
         f'    <button class="btn" id="btn-mode" data-mode="{cur_mode}">{mode_label}</button>\n'
         f'  </div>'
     )
@@ -733,10 +834,12 @@ document.addEventListener('DOMContentLoaded', () => {{
   <button class="btn primary">▶ Start · away 5h</button>
   <button class="btn ghost">Pause</button>
 </div>'''
+    # Mobile Pause button dropped too — the header power toggle is visible at every
+    # width (only the .mode text is hidden on mobile, not the toggle) so one control
+    # now serves desktop and mobile.
     new_mobile = (
         '<div class="mobilebar">\n'
         '  <button class="btn primary btn-mobile-start">▶ Start · away 5h</button>\n'
-        '  <button class="btn ghost btn-mobile-pause">Pause</button>\n'
         f'  <button class="btn ghost" id="btn-mode-m" data-mode="{cur_mode}">{("Review" if cur_mode=="full-auto" else "Auto")}</button>\n'
         '</div>'
     )
@@ -933,6 +1036,9 @@ def _wsl_path(abs_path: str, distro: str) -> str:
 
 def _build_run_html(run_id: str, cfg: dict) -> str:
     """Build the per-run page."""
+    # Header power toggle — kill-switch file existence is the source of truth (cheap;
+    # avoids a full compute_status()/usage-API round trip just to render a page).
+    toggle_html = _pwr_toggle_html(cfg["kill_switch_path"].exists(), gatemod.run_in_flight())
     distro = (cfg.get("wsl") or {}).get("distro", "Ubuntu")
     runs_dir = state.RUNS_DIR
     run_dir = runs_dir / run_id
@@ -1116,7 +1222,10 @@ fetch('/api/run-activity').then(r=>r.json()).then(rpShow).catch(()=>{{}});
       <div class="crescent"></div>
       <h1>Moon<em>lighter</em></h1>
     </a>
-    <div class="mode"><a href="/" style="color:var(--dim);text-decoration:none">← back</a></div>
+    <div class="hdrright">
+      {toggle_html}
+      <div class="mode"><a href="/" style="color:var(--dim);text-decoration:none">← back</a></div>
+    </div>
   </header>
 
   <section class="runcard" id="run-card" style="display:none">
@@ -1156,6 +1265,7 @@ fetch('/api/run-activity').then(r=>r.json()).then(rpShow).catch(()=>{{}});
   <footer>moonlighter · works while you sleep · everything revertible</footer>
 </div>
 {revert_script}
+{_pwr_toggle_script()}
 </body>
 </html>"""
 
@@ -1258,6 +1368,9 @@ def _build_manifest_ops(manifest: list, run_dir: pathlib.Path, distro: str) -> s
 
 
 def _build_night_html(cfg: dict) -> str:
+    # Header power toggle — kill-switch file existence is the source of truth (cheap;
+    # avoids a full compute_status()/usage-API round trip just to render a page).
+    toggle_html = _pwr_toggle_html(cfg["kill_switch_path"].exists(), gatemod.run_in_flight())
     d = digestmod.build_night()
     tmpl = (HERE / "template.html").read_text(encoding="utf-8")
     s, e = tmpl.find("<style>"), tmpl.find("</style>") + 8
@@ -1489,7 +1602,7 @@ code{{word-break:break-all}}
 .btn[disabled]{{opacity:.3;pointer-events:none}}
 </style></head><body><div class="wrap">
 <header><a href="/" class="brand" style="text-decoration:none;color:inherit"><div class="crescent"></div><h1>Moon<em>lighter</em></h1></a>
-<div class="mode"><a href="/" style="color:var(--dim);text-decoration:none">← dashboard</a></div></header>
+<div class="hdrright">{toggle_html}<div class="mode"><a href="/" style="color:var(--dim);text-decoration:none">← dashboard</a></div></div></header>
 
 <div class="label">Last night — {d['date']}</div>
 <div class="nsum">{_html_escape(d['summary'])}</div>
@@ -1566,6 +1679,7 @@ document.getElementById('btn-revapply').addEventListener('click', ()=>{{
 }});
 upd();
 </script>
+{_pwr_toggle_script()}
 </body></html>"""
 
 
@@ -2376,9 +2490,10 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
         self._send_json(200, {"ok": True})
 
     def _handle_pause(self, body: dict):
-        if not self._check_pin(body):
-            self._send_json(403, {"ok": False, "error": "bad pin"})
-            return
+        # No PIN check — pausing is deliberately frictionless (see design doc "Accepted
+        # risk"): off is the fail-safe direction (no spend, no filesystem mutation), so
+        # it stays open even though this endpoint is shared with the ntfy bridge. Only
+        # resume (which spends quota) stays PIN-gated below.
         try:
             p = CFG["kill_switch_path"]
             p.parent.mkdir(parents=True, exist_ok=True)
