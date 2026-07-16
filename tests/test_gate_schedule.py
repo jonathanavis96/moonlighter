@@ -7,8 +7,11 @@ into tmp_path so nothing here touches the real ~/.moonlighter.
 import datetime
 import pathlib
 import sys
+import types
 
 import pytest
+
+sys.modules.setdefault("yaml", types.SimpleNamespace(safe_load=lambda *a, **k: {}, safe_dump=lambda *a, **k: ""))
 
 LIB = pathlib.Path(__file__).resolve().parents[1] / "lib"
 sys.path.insert(0, str(LIB))
@@ -120,10 +123,25 @@ def test_due_task_launches_with_correct_env_and_marked_fired(env):
     assert "Fix security patching" in mission_path.read_text(encoding="utf-8")
     assert launch_env["ML_WALLCLOCK_MIN"] == "300"
     assert launch_env["ML_FIVE_TARGET"] == "80"
+    assert launch_env["ML_ACTIVE_BUCKET"] == "seven_day"
 
     updated = schedule.get(task["id"])
     assert updated["status"] == schedule.STATUS_FIRED
     assert updated["fired_at"] is not None
+
+
+def test_due_task_passes_sonnet_active_bucket(env):
+    cfg, popen_calls = env
+    cfg["night_model"] = "sonnet"
+
+    now = datetime.datetime.now().astimezone()
+    task = _task(now - datetime.timedelta(minutes=5))
+    schedule.save([task])
+
+    fired = gate._process_scheduled(cfg)
+
+    assert fired is True
+    assert popen_calls[0]["env"]["ML_ACTIVE_BUCKET"] == "seven_day_sonnet"
 
 
 def test_future_task_left_pending_and_not_launched(env):

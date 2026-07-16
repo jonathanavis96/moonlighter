@@ -124,8 +124,6 @@ def compute_status(cfg=None, manual_away_hours=None):
     usage, uerr = gather_usage()
     window = resolve_window(cfg)
     abname = active_bucket_name(cfg)
-    is_first_run = len(state.calibration_records()) == 0
-
     # --- hard skips ---
     kill = cfg["kill_switch_path"].exists()
     inflight = run_in_flight()
@@ -351,6 +349,7 @@ def _process_scheduled(cfg):
 
         env = dict(os.environ)
         env["ML_MISSION_FILE"] = str(mission_file)
+        env["ML_ACTIVE_BUCKET"] = active_bucket_name(cfg)
         if task.get("wallclock_min"):
             env["ML_WALLCLOCK_MIN"] = str(task["wallclock_min"])
         if task.get("five_target"):

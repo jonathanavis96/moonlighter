@@ -89,7 +89,12 @@ def test_scheduled_env_mission_and_caps_drive_runner_main(tmp_path, monkeypatch)
     rc = runner.main()
 
     assert rc == 0
-    assert (run_dir / "mission.md").read_text(encoding="utf-8") == custom_mission
+    mission = (run_dir / "mission.md").read_text(encoding="utf-8")
+    assert custom_mission.strip() in mission
+    assert "## MODE: FULL-AUTO" in mission
+    assert "EVERY filesystem mutation MUST go through the helper" in mission
+    assert "Nothing outward-facing, EVER" in mission
+    assert "one-off scheduled task, not the broad nightly estate audit" in mission
 
     [supervise_call] = supervise_calls
     assert supervise_call["five_target"] == 42
