@@ -155,8 +155,8 @@ def build_mission(task):
     folder = (task.get("folder") or "").strip()
     if folder:
         lines += ["## Work root", "",
-                  f"Do this work in `{folder}`. Stay inside it unless the task "
-                  "above explicitly sends you elsewhere.", ""]
+                  f"Do this work in `{folder}`. Stay inside this Work root for any "
+                  "full-auto filesystem changes; anything elsewhere is audit-only.", ""]
 
     docs = [d for d in (task.get("docs") or []) if str(d).strip()]
     if docs:

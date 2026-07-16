@@ -95,6 +95,9 @@ def test_scheduled_env_mission_and_caps_drive_runner_main(tmp_path, monkeypatch)
     assert "EVERY filesystem mutation MUST go through the helper" in mission
     assert "Nothing outward-facing, EVER" in mission
     assert "one-off scheduled task, not the broad nightly estate audit" in mission
+    assert "paths outside that validated" in mission
+    assert "even if the user-authored brief explicitly names them" in mission
+    assert "must stay inside the validated Work root" in mission
 
     [supervise_call] = supervise_calls
     assert supervise_call["five_target"] == 42

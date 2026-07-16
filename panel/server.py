@@ -2337,9 +2337,12 @@ def _validate_schedule(body: dict, cfg: dict) -> dict:
         d = str(d).strip()
         if not d:
             continue
-        if not pathlib.Path(os.path.expanduser(d)).exists():
+        doc_path = pathlib.Path(os.path.expanduser(d)).resolve()
+        if not doc_path.is_file():
             raise ValueError(f"document does not exist: {d}")
-        docs.append(d)
+        if cfgmod.is_off_limits(str(doc_path), cfg):
+            raise ValueError(f"document is off-limits: {d}")
+        docs.append(str(doc_path))
 
     # Note: 0 is a deliberately-supplied value, not "unset" — only None/"" (missing
     # or an empty form field) skip validation. 0 must still fail the range check.

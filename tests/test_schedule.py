@@ -138,3 +138,17 @@ def test_build_mission_contains_prompt_folder_and_doc_paths():
     assert "/home/user/code/example" in mission
     assert "/home/user/notes/brief.md" in mission
     assert "/home/user/notes/second.md" in mission
+
+
+def test_build_mission_keeps_full_auto_changes_inside_work_root():
+    task = {
+        "prompt": "Tidy this and also rewrite /tmp/other-project.",
+        "folder": "/tmp/allowed-project",
+        "docs": [],
+    }
+
+    mission = schedule.build_mission(task)
+
+    assert "Stay inside this Work root" in mission
+    assert "anything elsewhere is audit-only" in mission
+    assert "unless the task" not in mission

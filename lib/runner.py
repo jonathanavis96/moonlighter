@@ -337,9 +337,10 @@ Stop cleanly when whichever of these ceilings is hit first:
 ## HARD RULES (non-negotiable)
 - Nothing outward-facing, EVER: no git push, no deploys, no emails/messages, no calendar events,
   no publishing API calls, no installs that phone home. Unattended ⇒ no irreversible outward acts.
-- Stay within the scheduled task scope. Treat anything outside that scope as audit-only unless the
-  user-authored brief explicitly names it.
-- In full-auto, every local filesystem mutation must go through the revertible helper above.
+- Stay within the scheduled task scope and selected Work root. Treat paths outside that validated
+  Work root as audit-only, even if the user-authored brief explicitly names them.
+- In full-auto, every local filesystem mutation must stay inside the validated Work root and must
+  go through the revertible helper above.
 - In observe mode, touch nothing outside this run dir even if the scheduled brief asks for changes.
 - No real deletes: "delete" means `ml_fs.py trash` (revertible). Snapshot before editing any file.
 - Log every mutating action to the manifest via the helper BEFORE doing it.

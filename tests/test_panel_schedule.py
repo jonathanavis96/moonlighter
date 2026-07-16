@@ -175,6 +175,25 @@ def test_schedule_create_rejects_folder_outside_work_roots(running_panel, tmp_pa
     assert "work roots" in data["error"].lower()
     assert schedulemod.load() == []
 
+
+def test_schedule_create_rejects_off_limits_document(running_panel):
+    port, work_dir = running_panel
+    secret_dir = work_dir / "secret"
+    secret_dir.mkdir()
+    secret_doc = secret_dir / "brief.txt"
+    secret_doc.write_text("do not read me", encoding="utf-8")
+    panelserver.CFG["off_limits_resolved"] = [str(secret_dir)]
+
+    status, data = _post(port, "/api/schedule", {
+        "prompt": "do the thing", "folder": str(work_dir), "run_at": _future_iso(),
+        "docs": [str(secret_doc)], "pin": TEST_PIN,
+    })
+
+    assert status == 400
+    assert data["ok"] is False
+    assert "off-limits" in data["error"].lower()
+    assert schedulemod.load() == []
+
 def test_schedule_create_success_persists_pending_task(running_panel):
     port, work_dir = running_panel
 
