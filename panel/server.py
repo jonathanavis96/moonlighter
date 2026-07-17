@@ -562,6 +562,18 @@ function renderStatus(s) {{
   if (s.live === false) {{
     el('mode-line').textContent = '● no live data';
     ['five-huge','week-huge'].forEach(id => el(id).textContent = '--');
+    // Render the freshness state here too: this early return otherwise leaves
+    // the previous footer (reset times, or a "cached" badge) in place when an
+    // auto-refresh lands in the no-data state, and the missing-data badge
+    // below this guard would never run.
+    const uNL = s.usage || {{}};
+    const noteNL = uNL.missing
+      ? '<b class="stale-badge" title="Usage API unreachable and no cached reading exists yet.">⚠ no usage data</b>'
+      : uNL.stale
+      ? '<b class="stale-badge" title="Usage API unreachable; showing the last good reading.">⚠ cached, as of ' + esc(uNL.as_of || '?') + '</b>'
+      : '';
+    el('five-resets').innerHTML = noteNL;
+    el('week-resets').innerHTML = noteNL;
     return;
   }}
 
