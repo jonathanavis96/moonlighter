@@ -276,6 +276,7 @@ def cmd_gc(args):
         # Actually delete, counting only what really goes and reporting anything that doesn't.
         errors = []
         removed_bytes = 0
+        removed_any = False
         for t in existing:
             tb = _dir_bytes(t)
             try:
@@ -284,14 +285,16 @@ def cmd_gc(args):
                 errors.append((t, exc))
             if not t.exists():
                 removed_bytes += tb
+                removed_any = True
             elif not any(p == t for p, _ in errors):
                 errors.append((t, "target still present after rmtree"))
         freed += removed_bytes
         # If ANY revert-data target was actually removed, the run can no longer be fully
         # reverted — mark it non-revertible even on a PARTIAL purge (one target gone, the
-        # other failed), so the report says so and `moonlight revert` refuses instead of
-        # running a revert.sh that would silently skip the now-missing records.
-        if removed_bytes > 0:
+        # other failed) or a ZERO-BYTE one (an empty trashed dir is still a revert record),
+        # so the report says so and `moonlight revert` refuses instead of running a revert.sh
+        # that would silently skip the now-missing records. Key on removal, not bytes.
+        if removed_any:
             _mark_revert_purged(d, meta, meta_f)
         if errors:
             failed += 1

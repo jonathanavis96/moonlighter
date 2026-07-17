@@ -81,6 +81,24 @@ def test_gc_purges_old_run_and_marks_non_revertible(monkeypatch, tmp_path):
     assert any("purged by gc" in e for e in meta.get("finalisation_errors", []))
 
 
+def test_gc_zero_byte_purge_marks_non_revertible(monkeypatch, tmp_path):
+    # An empty trashed/snapshot dir frees 0 bytes but is still a revert record — removing it
+    # must still mark the run non-revertible (key on removal, not byte count).
+    runs = tmp_path / "runs"
+    rd = runs / "20260101-000000"
+    rd.mkdir(parents=True)
+    (rd / "run.json").write_text(json.dumps({"status": "clean", "finished": _old_iso(30)}))
+    (rd / "trash").mkdir()      # empty → 0 bytes
+    (rd / "snapshot").mkdir()   # empty → 0 bytes
+    (rd / "revert.sh").write_text("#!/bin/bash\n")
+    monkeypatch.setattr(cli.state, "RUNS_DIR", runs)
+    rc = cli.cmd_gc(types.SimpleNamespace(days=14, dry_run=False))
+    assert rc == 0
+    assert not (rd / "trash").exists() and not (rd / "snapshot").exists()
+    assert json.loads((rd / "run.json").read_text()).get("revert_purged") is True
+    assert not (rd / "revert.sh").exists()
+
+
 def test_gc_dry_run_touches_nothing(monkeypatch, tmp_path):
     runs = tmp_path / "runs"
     rd = _make_run(runs, "20260101-000000", finished=_old_iso(30))
