@@ -13,7 +13,6 @@ extraction, no behaviour change beyond the new kill-switch check — to make
 it directly exercisable here.
 """
 import datetime
-import inspect
 import pathlib
 import sys
 
@@ -89,19 +88,6 @@ def test_absent_kill_switch_does_not_stop_the_loop(run_dir, monkeypatch):
 
     assert stop_reason == "session ended"
 
-
-def test_finalize_runs_unconditionally_after_supervise():
-    """Regression guard: main() must call revert/report/notify unconditionally
-    after _supervise() returns, for ANY stop_reason (no early return that
-    could let the new switched-off path skip finalisation)."""
-    src = inspect.getsource(runner.main)
-    idx_supervise = src.index("stop_reason = _supervise(")
-    idx_revert = src.index("revertmod.write_revert_script(run_dir)")
-    idx_report = src.index("reportmod.write_report(cfg, run_dir, run_meta)")
-    assert idx_supervise < idx_revert < idx_report
-
-    between = src[idx_supervise:idx_revert]
-    assert "return" not in between, (
-        "no early return may sit between the supervisor loop and the "
-        "revert/report/notify wrap-up — every stop_reason must finalise"
-    )
+# The old source-inspection guard (`test_finalize_runs_unconditionally_after_supervise`)
+# was replaced by behavioural tests in test_runner_finalisation.py, which drive
+# main() end-to-end and assert revert.sh + the report survive wrap-up failures.
