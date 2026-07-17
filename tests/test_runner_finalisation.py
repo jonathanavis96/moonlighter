@@ -77,7 +77,10 @@ def harness(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "_session_transcripts", lambda since_ts: [])
     monkeypatch.setattr(runner, "_sum_tokens", lambda paths: 0)
 
-    # tmux + timing stubbed
+    # tmux + timing stubbed (which() too, so the tests stay hermetic on
+    # machines without tmux — runner.main() prechecks it before any of the
+    # patched subprocess.run calls)
+    monkeypatch.setattr(runner.shutil, "which", lambda name: "/usr/bin/tmux")
     monkeypatch.setattr(runner, "SESSION_CWD", tmp_path / "session")
     monkeypatch.setattr(runner.subprocess, "run",
                         lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=""))
