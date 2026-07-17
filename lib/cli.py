@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import webbrowser
@@ -186,6 +187,75 @@ def cmd_attach(args):
     os.execvp("tmux", ["tmux", "attach", "-t", TMUX])
 
 
+def _dir_bytes(path):
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                if not os.path.islink(fp):
+                    total += os.path.getsize(fp)
+            except OSError:
+                pass
+    return total
+
+
+def cmd_gc(args):
+    """Purge trash/ + snapshot/ for clean runs older than --days, keeping
+    manifest.jsonl + run.json for audit/revert-listing. This is what stops
+    ~/.moonlighter/runs from growing unbounded (each run keeps full revertible
+    copies of everything it touched forever otherwise)."""
+    days = args.days
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
+    runs_dir = state.RUNS_DIR
+    if not runs_dir.exists():
+        print("No runs dir.")
+        return 0
+    freed = 0
+    purged = 0
+    kept = 0
+    for d in sorted(runs_dir.iterdir()):
+        if not d.is_dir() or d.name.startswith(("apply-", "MOCK")):
+            continue
+        meta_f = d / "run.json"
+        if not meta_f.exists():
+            continue
+        try:
+            meta = json.loads(meta_f.read_text())
+        except Exception:
+            continue
+        if meta.get("status") != "clean":
+            kept += 1
+            continue
+        stamp = meta.get("finished") or meta.get("started") or ""
+        try:
+            when = datetime.datetime.fromisoformat(stamp)
+        except ValueError:
+            when = datetime.datetime.fromtimestamp(d.stat().st_mtime)
+        if when > cutoff:
+            kept += 1
+            continue
+        targets = [d / "trash", d / "snapshot"]
+        run_freed = sum(_dir_bytes(t) for t in targets if t.exists())
+        if run_freed == 0 and not any(t.exists() for t in targets):
+            continue
+        if args.dry_run:
+            print(f"  would purge {d.name}  ({run_freed/1e9:.2f} GB)  [{when:%Y-%m-%d}]")
+        else:
+            for t in targets:
+                if t.exists():
+                    shutil.rmtree(t, ignore_errors=True)
+            print(f"  purged {d.name}  freed {run_freed/1e9:.2f} GB  [{when:%Y-%m-%d}]")
+        freed += run_freed
+        purged += 1
+    verb = "would free" if args.dry_run else "freed"
+    print(f"\n  {purged} run(s) {'eligible' if args.dry_run else 'purged'}, "
+          f"{kept} kept (not clean / newer than {days}d) — {verb} {freed/1e9:.2f} GB.")
+    if args.dry_run:
+        print("  (dry run — re-run with --apply to actually purge)")
+    return 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="moonlight", description="Moonlighter control")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -202,6 +272,12 @@ def build_parser():
     lp = sub.add_parser("log"); lp.add_argument("-n", type=int, default=40); lp.set_defaults(fn=cmd_log)
     sub.add_parser("ui").set_defaults(fn=cmd_ui)
     sub.add_parser("attach").set_defaults(fn=cmd_attach)
+    gp = sub.add_parser("gc", help="purge trash/+snapshot/ of clean runs older than --days (keeps manifest)")
+    gp.add_argument("--days", type=int, default=14, help="keep revert data for runs newer than this many days (default 14)")
+    gmx = gp.add_mutually_exclusive_group()
+    gmx.add_argument("--apply", dest="dry_run", action="store_false", help="actually purge (default is dry-run)")
+    gmx.add_argument("--dry-run", dest="dry_run", action="store_true", help="preview only (default)")
+    gp.set_defaults(fn=cmd_gc, dry_run=True)
     return p
 
 

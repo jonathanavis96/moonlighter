@@ -575,11 +575,11 @@ def main():
     wallclock_min = int(cfg.get("max_wallclock_min", 360))
     if wallclock_override is not None:
         wallclock_min = wallclock_override
-    night_model = cfg.get("night_model", "default")
+    night_model = os.environ.get("ML_NIGHT_MODEL") or cfg.get("night_model", "default")
     five_target = float(cfg.get("five_hour_target_pct", 80))
     if five_target_override is not None:
         five_target = five_target_override
-    reserve = float(cfg.get("weekly_reserve_pct", 10))
+    reserve = float(os.environ.get("ML_RESERVE") or cfg.get("weekly_reserve_pct", 10))
     weekly_cap = 100.0 - reserve
 
     # usage before
@@ -642,6 +642,11 @@ def main():
     claude_inner = f"{scrub} claude --dangerously-skip-permissions"
     if night_model == "sonnet":
         claude_inner += " --model sonnet"
+    elif night_model == "fable":
+        claude_inner += " --model claude-fable-5"
+    elif night_model not in ("default", ""):
+        # Arbitrary model passthrough (explicit model id).
+        claude_inner += f" --model {shlex_quote(night_model)}"
     claude_cmd = f"exec bash -lc {shlex_quote(claude_inner)}"
     subprocess.run(["tmux", "kill-session", "-t", TMUX],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

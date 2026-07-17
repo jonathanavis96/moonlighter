@@ -132,6 +132,18 @@ def _load_last_good():
         return 0, None
 
 
+def last_known():
+    """
+    (ts, data) of the last good reading on disk, of ANY age — for DISPLAY only.
+
+    get_usage() deliberately goes to None once the reading is older than STALE_GRACE so a
+    stale number can never drive a gate launch. The panel, though, should keep showing the
+    last reading (dated) rather than going blank when the API is down for a long spell.
+    Returns (0.0, None) when there is no cached reading at all. NEVER use this for a decision.
+    """
+    return _load_last_good()
+
+
 def last_serve_info() -> dict:
     """
     Staleness of the value most recently returned by get_usage(), so callers (the panel)

@@ -559,7 +559,10 @@ function renderStatus(s) {{
   // Scheduled tasks don't depend on the usage API — render them even when
   // live usage data is unavailable, same reasoning as the power toggle above.
   renderSchedTasks(s.scheduled_tasks);
-  if (s.live === false) {{
+  // `live===false` means no DECISION-grade reading — but we may still hold a cached one
+  // to show (dated, with the ⚠ badge below). Only fall back to "no live data" when there
+  // has never been a reading at all; otherwise keep showing the last number.
+  if (s.live === false && !(s.usage && s.usage.has_data)) {{
     el('mode-line').textContent = '● no live data';
     ['five-huge','week-huge'].forEach(id => el(id).textContent = '--');
     // Render the freshness state here too: this early return otherwise leaves

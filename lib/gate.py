@@ -85,6 +85,32 @@ def _usage_freshness(usage):
         return {"as_of": None, "age_sec": None, "stale": False, "missing": False}
 
 
+def _display_freshness(usage, disp_ts, disp_data):
+    """
+    Freshness of the value the panel actually SHOWS, which may be a cached reading older
+    than STALE_GRACE (decision-grade `usage` has already gone None by then). The gate will
+    not act on it, but the panel should keep showing it, dated, rather than blank.
+
+    `missing` here tracks the usage contract's `has_data`, not `_usage_freshness`'s own
+    True-whenever-usage-is-None rule: once a cached reading exists to show, this is no
+    longer "missing" even though decision-grade `usage` already is.
+    """
+    if usage is not None:
+        return _usage_freshness(usage)
+    if disp_data is not None and disp_ts:
+        try:
+            age = datetime.datetime.now().timestamp() - disp_ts
+            return {
+                "as_of": datetime.datetime.fromtimestamp(disp_ts).strftime("%H:%M"),
+                "age_sec": int(age),
+                "stale": True,
+                "missing": False,
+            }
+        except Exception:
+            pass
+    return {"as_of": None, "age_sec": None, "stale": True, "missing": True}
+
+
 def _extract_activity(pane):
     """Pull the agent's narration (● lines) + current spinner status from a pane."""
     narration, spinner = [], ""
@@ -151,6 +177,13 @@ def compute_status(cfg=None, manual_away_hours=None):
     t = _now_hms()
     checks = []
     usage, uerr = gather_usage()
+    # Decision-grade `usage` is None once the reading is older than STALE_GRACE, so the gate
+    # never launches on a stale number. For DISPLAY, fall back to the last known reading of
+    # any age so the panel keeps showing it (dated) instead of blanking when the API is down
+    # for a long spell. This value MUST NOT feed any check below — only the contract's gauges.
+    disp_ts, disp_data = 0.0, usage
+    if usage is None:
+        disp_ts, disp_data = usage_api.last_known()
     window = resolve_window(cfg)
     abname = active_bucket_name(cfg)
     # --- hard skips ---
@@ -244,7 +277,7 @@ def compute_status(cfg=None, manual_away_hours=None):
 
     # --- assemble contract ---
     def hum(name):
-        b = _bucket(usage, name)
+        b = _bucket(disp_data, name)
         return {
             "utilization": b.get("utilization"),
             "resets_at": b.get("resets_at"),
@@ -266,11 +299,15 @@ def compute_status(cfg=None, manual_away_hours=None):
             "active_bucket": abname,
             "five_hour_max_pct": five_max,
             "weekly_reserve_pct": float(cfg.get("weekly_reserve_pct", 10)),
-            # Staleness of the numbers above. `live` only says we have SOME data —
-            # on a 429 that data can be up to STALE_GRACE (90 min) old and is
-            # otherwise indistinguishable from a fresh reading. A gauge that shows a
-            # frozen number as current is worse than one that admits it is frozen.
-            **_usage_freshness(usage),
+            # Whether the gauges above carry a number at all (fresh OR cached). The panel
+            # shows them whenever this is true; it only falls back to "no live data" when
+            # there has never been a reading to show.
+            "has_data": disp_data is not None,
+            # Staleness of the numbers above. `live` only says we have DECISION-GRADE data —
+            # on a 429 the shown value can be a cached reading (any age) and is otherwise
+            # indistinguishable from a fresh one. A gauge that shows a frozen number as
+            # current is worse than one that admits it is frozen.
+            **_display_freshness(usage, disp_ts, disp_data),
         },
         "gate": {
             "checks": checks,
@@ -280,8 +317,8 @@ def compute_status(cfg=None, manual_away_hours=None):
             "budget": bud,
         },
         "window": window,
-        "heatmap": history.heatmap_normalized(),
-        "heatmap_raw": history.get_histogram(),
+        "heatmap_raw": (_hm := history.get_histogram()),
+        "heatmap": history.heatmap_normalized(grid=_hm),
         "heatmap_now": history.now_cell(),
         "graph": graphmod.build(cfg, usage, bud) if usage else {"svg": "", "caption": ""},
         "runs": _runs_for_panel(),
