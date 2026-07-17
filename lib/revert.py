@@ -112,6 +112,17 @@ def run_revert(run_id):
     if not run_dir.exists():
         print(f"No such run: {run_id}", file=sys.stderr)
         return 1
+    # A GC'd run has had its trash/snapshot data removed; regenerating and running a script
+    # against missing data would silently "succeed" while restoring nothing. Refuse loudly.
+    meta_f = run_dir / "run.json"
+    if meta_f.exists():
+        try:
+            if json.loads(meta_f.read_text()).get("revert_purged"):
+                print(f"Run {run_id} is no longer revertible: its revert data was purged by "
+                      f"gc. Nothing to restore.", file=sys.stderr)
+                return 1
+        except (OSError, ValueError):
+            pass
     script = run_dir / "revert.sh"
     if not script.exists():
         script = write_revert_script(run_dir)

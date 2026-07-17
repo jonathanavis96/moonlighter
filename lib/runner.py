@@ -576,6 +576,12 @@ def main():
     if wallclock_override is not None:
         wallclock_min = wallclock_override
     night_model = os.environ.get("ML_NIGHT_MODEL") or cfg.get("night_model", "default")
+    # Derive the quota bucket from the effective night model when the caller didn't set one
+    # explicitly. Launched directly (ML_NIGHT_MODEL=sonnet, no ML_ACTIVE_BUCKET), _read_budget_env
+    # defaults to seven_day, so a Sonnet run would be checked against the general weekly reserve
+    # and could run past the Sonnet reserve. Mirrors gate.active_bucket_name().
+    if "ML_ACTIVE_BUCKET" not in os.environ:
+        bucket = "seven_day_sonnet" if night_model == "sonnet" else "seven_day"
     five_target = float(cfg.get("five_hour_target_pct", 80))
     if five_target_override is not None:
         five_target = five_target_override
