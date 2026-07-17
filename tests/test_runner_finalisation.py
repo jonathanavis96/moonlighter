@@ -141,6 +141,27 @@ def test_capture_failure_still_writes_revert_and_report(harness):
     assert any("finalising anyway" in m for m in harness.logs)
 
 
+def test_report_failure_marks_run_failed_and_returns_nonzero(harness, monkeypatch):
+    """write_report() raising must not leave a 'clean' run.json and rc 0:
+    the run is marked finalisation-error, the failure is recorded, and
+    main() returns non-zero — while revert.sh is still written (each
+    finalisation step stays independent)."""
+    def boom(*a, **k):
+        raise OSError("report_dir is a regular file")
+    monkeypatch.setattr(runner.reportmod, "write_report", boom)
+
+    rc = runner.main()
+
+    assert rc != 0, "a run missing its report must not exit clean"
+    revert_sh = harness.run_dir / "revert.sh"
+    assert revert_sh.exists(), "revert.sh must ALWAYS be generated"
+    import json
+    meta = json.loads((harness.run_dir / "run.json").read_text(encoding="utf-8"))
+    assert meta["status"] == "finalisation-error"
+    assert any("write_report" in e for e in meta["finalisation_errors"])
+    assert any("finalisation errors" in m for m in harness.logs)
+
+
 def test_transcript_write_failure_still_writes_revert_and_report(harness):
     """The transcript write raising (here: IsADirectoryError, because a
     directory squats on transcript.txt) must not skip revert.sh or the

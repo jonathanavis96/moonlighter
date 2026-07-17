@@ -753,14 +753,32 @@ def main():
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # revert.sh + report + notify — each attempted independently so a
         # failure in one can never suppress the other
+        finalisation_failures = []
         try:
             revertmod.write_revert_script(run_dir)
         except Exception as exc:
             state.gate_log(f"runner: write_revert_script failed for {rid}: {exc!r}")
+            finalisation_failures.append(f"write_revert_script: {exc!r}")
         try:
             reportmod.write_report(cfg, run_dir, run_meta)
         except Exception as exc:
             state.gate_log(f"runner: write_report failed for {rid}: {exc!r}")
+            finalisation_failures.append(f"write_report: {exc!r}")
+
+    if finalisation_failures:
+        # A run without its revert.sh or morning report is NOT a clean run:
+        # record what is missing in run.json (best-effort) and fail the
+        # process so the gate log and the panel show a failed run instead of
+        # a silently incomplete "clean" one.
+        run_meta["status"] = "finalisation-error"
+        run_meta["finalisation_errors"] = finalisation_failures
+        try:
+            (run_dir / "run.json").write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        state.gate_log(f"runner: {rid} finished with finalisation errors — "
+                       + "; ".join(finalisation_failures))
+        return 1
 
     state.gate_log(f"runner: {rid} finished — {stop_reason}; spent {util_delta:.2f}% / {tokens_spent} tok")
     return 0
