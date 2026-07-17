@@ -56,6 +56,35 @@ def gather_usage():
         return None, str(exc)
 
 
+def _usage_freshness(usage):
+    """
+    How old the usage numbers actually are, for the panel to display.
+
+    Returns {"as_of": "HH:MM"|None, "age_sec": int|None, "stale": bool, "missing": bool}.
+    `stale` True means the reading did NOT come from a fresh fetch — it is a cached
+    value being served because the API is unavailable (typically HTTP 429). The panel
+    must show this; otherwise a frozen gauge is indistinguishable from a live one,
+    which is exactly how the 2026-07-17 "stuck at 0%/28%" bug hid for ~33 minutes.
+    `missing` True means there is NO reading at all (fresh install whose first fetch
+    failed, or an expired cache) — a different state from "cached": labelling it
+    "cached, as of ?" would send troubleshooting down the wrong path.
+    """
+    if usage is None:
+        return {"as_of": None, "age_sec": None, "stale": False, "missing": True}
+    try:
+        info = usage_api.last_serve_info()
+        ts, age = info.get("fetched_at") or 0, info.get("age")
+        return {
+            "as_of": datetime.datetime.fromtimestamp(ts).strftime("%H:%M") if ts else None,
+            "age_sec": int(age) if age is not None and age != float("inf") else None,
+            "stale": bool(info.get("stale", True)),
+            "missing": False,
+        }
+    except Exception:
+        # Never let a display concern break the gate's decision path.
+        return {"as_of": None, "age_sec": None, "stale": False, "missing": False}
+
+
 def _extract_activity(pane):
     """Pull the agent's narration (● lines) + current spinner status from a pane."""
     narration, spinner = [], ""
@@ -237,6 +266,11 @@ def compute_status(cfg=None, manual_away_hours=None):
             "active_bucket": abname,
             "five_hour_max_pct": five_max,
             "weekly_reserve_pct": float(cfg.get("weekly_reserve_pct", 10)),
+            # Staleness of the numbers above. `live` only says we have SOME data —
+            # on a 429 that data can be up to STALE_GRACE (90 min) old and is
+            # otherwise indistinguishable from a fresh reading. A gauge that shows a
+            # frozen number as current is worse than one that admits it is frozen.
+            **_usage_freshness(usage),
         },
         "gate": {
             "checks": checks,

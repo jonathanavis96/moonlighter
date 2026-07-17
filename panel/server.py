@@ -314,6 +314,27 @@ def _build_panel_html(status: dict, cfg: dict) -> str:
     five_resets_in = _html_escape(str(five.get("resets_in", "")))
     week_resets_in = _html_escape(str(week.get("resets_in", "")))
 
+    # Staleness badge. When the usage API is unavailable (typically HTTP 429) the gauges
+    # are served from cache and can be up to 90 min old — visually identical to live data.
+    # Say so, or a frozen gauge reads as current (the 2026-07-17 "stuck at 0%/28%" bug).
+    usage_stale = bool(usage.get("stale"))
+    usage_missing = bool(usage.get("missing"))
+    usage_as_of = _html_escape(str(usage.get("as_of") or "?"))
+    if usage_missing:
+        # No reading exists at all — a different failure from serving a cached
+        # one; "cached, as of ?" here would mislead troubleshooting.
+        stale_note = (
+            ' · <b class="stale-badge" title="Usage API unreachable and no cached reading exists yet.">'
+            '⚠ no usage data</b>'
+        )
+    elif usage_stale:
+        stale_note = (
+            f' · <b class="stale-badge" title="Usage API unreachable; showing the last good reading.">'
+            f'⚠ cached, as of {usage_as_of}</b>'
+        )
+    else:
+        stale_note = ""
+
     mode_text = _html_escape(str(status.get("mode", "")))
     night_text = _html_escape(str(status.get("night", "")))
     is_live = status.get("live", False)
@@ -541,6 +562,18 @@ function renderStatus(s) {{
   if (s.live === false) {{
     el('mode-line').textContent = '● no live data';
     ['five-huge','week-huge'].forEach(id => el(id).textContent = '--');
+    // Render the freshness state here too: this early return otherwise leaves
+    // the previous footer (reset times, or a "cached" badge) in place when an
+    // auto-refresh lands in the no-data state, and the missing-data badge
+    // below this guard would never run.
+    const uNL = s.usage || {{}};
+    const noteNL = uNL.missing
+      ? '<b class="stale-badge" title="Usage API unreachable and no cached reading exists yet.">⚠ no usage data</b>'
+      : uNL.stale
+      ? '<b class="stale-badge" title="Usage API unreachable; showing the last good reading.">⚠ cached, as of ' + esc(uNL.as_of || '?') + '</b>'
+      : '';
+    el('five-resets').innerHTML = noteNL;
+    el('week-resets').innerHTML = noteNL;
     return;
   }}
 
@@ -561,12 +594,20 @@ function renderStatus(s) {{
   el('five-huge').textContent = fiveUtil;
   el('five-track-i').style.width = fiveUtil + '%';
   el('five-track-u').style.left = fiveMax + '%';
-  el('five-resets').innerHTML = 'resets in <b>' + esc(five.resets_in || '') + '</b> · start threshold <b>' + fiveMax + '%</b>';
+  // Staleness badge — mirrors the server-rendered one. Without this the badge would
+  // vanish on the first auto-refresh and a cached gauge would look live again.
+  const staleNote = u.missing
+    ? ' · <b class="stale-badge" title="Usage API unreachable and no cached reading exists yet.">⚠ no usage data</b>'
+    : u.stale
+    ? ' · <b class="stale-badge" title="Usage API unreachable; showing the last good reading.">⚠ cached, as of ' + esc(u.as_of || '?') + '</b>'
+    : '';
+
+  el('five-resets').innerHTML = 'resets in <b>' + esc(five.resets_in || '') + '</b> · start threshold <b>' + fiveMax + '%</b>' + staleNote;
 
   el('week-huge').textContent = weekUtil;
   el('week-track-i').style.width = weekUtil + '%';
   el('week-track-u').style.left = (100 - weekReserve) + '%';
-  el('week-resets').innerHTML = 'resets in <b>' + esc(week.resets_in || '') + '</b> · reserve <b>' + weekReserve + '%</b>';
+  el('week-resets').innerHTML = 'resets in <b>' + esc(week.resets_in || '') + '</b> · reserve <b>' + weekReserve + '%</b>' + staleNote;
 
   // Gate console
   const gate = s.gate || {{}};
@@ -898,7 +939,7 @@ document.addEventListener('DOMContentLoaded', () => {{
     old_five_resets = '<p class="resets">resets in <b>3 h 14 m</b> · start threshold <b>20%</b></p>'
     new_five_resets = (
         f'<p class="resets" id="five-resets">'
-        f'resets in <b>{five_resets_in}</b> · start threshold <b>{five_max_pct:.0f}%</b>'
+        f'resets in <b>{five_resets_in}</b> · start threshold <b>{five_max_pct:.0f}%</b>{stale_note}'
         f'</p>'
     )
     html = html.replace(old_five_resets, new_five_resets, 1)
@@ -922,7 +963,7 @@ document.addEventListener('DOMContentLoaded', () => {{
     old_week_resets = '<p class="resets">resets <b>Friday 06:00</b> · reserve <b>10%</b></p>'
     new_week_resets = (
         f'<p class="resets" id="week-resets">'
-        f'resets in <b>{week_resets_in}</b> · reserve <b>{weekly_reserve_pct:.0f}%</b>'
+        f'resets in <b>{week_resets_in}</b> · reserve <b>{weekly_reserve_pct:.0f}%</b>{stale_note}'
         f'</p>'
     )
     html = html.replace(old_week_resets, new_week_resets, 1)
