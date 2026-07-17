@@ -45,6 +45,26 @@ def write_report(cfg, run_dir, meta):
     tokens = meta.get("tokens_spent", 0)
     tokh = f"{tokens/1000:.0f}k" if tokens < 1_000_000 else f"{tokens/1_000_000:.1f}M"
 
+    # The Revert section must reflect reality: if revert.sh was not generated
+    # (write_revert_script failed — see finalisation_errors in run.json), the
+    # report must say so instead of pointing at a script that does not exist.
+    revert_sh = run_dir / "revert.sh"
+    if revert_sh.exists():
+        revert_md = f"""This run is fully revertible:
+
+```
+moonlight revert {rid}
+```
+
+(or inspect/run `{revert_sh}`)"""
+    else:
+        errs = "; ".join(meta.get("finalisation_errors", [])) or "revert.sh was not generated"
+        revert_md = (
+            "⚠ **revert.sh could not be generated — this run is NOT one-command revertible.**\n"
+            f"Failure: `{errs}`\n"
+            f"Review the file actions listed above and undo manually if needed (run dir: `{run_dir}`)."
+        )
+
     body = f"""# Moonlighter — {meta.get('date_human', date)}  ({'dry run' if dry else 'full-auto'})
 
 **Run id:** `{rid}`  ·  **status:** {meta.get('status')}  ·  **stop:** {meta.get('stop_reason')}
@@ -62,13 +82,7 @@ def write_report(cfg, run_dir, meta):
 - Tonight's budget ceiling was: {meta.get('budget_pct')}% (≈ {meta.get('budget_tokens')} tok)
 
 ## Revert
-This run is fully revertible:
-
-```
-moonlight revert {rid}
-```
-
-(or inspect/run `{run_dir/'revert.sh'}`)
+{revert_md}
 """
     dest.write_text(body, encoding="utf-8")
 

@@ -182,7 +182,12 @@ def test_revert_failure_is_visible_in_the_report_it_writes(harness, monkeypatch)
     assert rc != 0
     assert seen["status_at_report_time"] == "finalisation-error"
     assert any("write_revert_script" in e for e in seen["errors_at_report_time"])
-    assert harness.report_files(), "the report itself must still be written"
+    reports = harness.report_files()
+    assert reports, "the report itself must still be written"
+    report_text = reports[0].read_text(encoding="utf-8")
+    assert "NOT one-command revertible" in report_text, \
+        "the report must not claim revertibility without revert.sh"
+    assert "fully revertible" not in report_text
     import json
     meta = json.loads((harness.run_dir / "run.json").read_text(encoding="utf-8"))
     assert meta["status"] == "finalisation-error"
