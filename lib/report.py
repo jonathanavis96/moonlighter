@@ -45,11 +45,15 @@ def write_report(cfg, run_dir, meta):
     tokens = meta.get("tokens_spent", 0)
     tokh = f"{tokens/1000:.0f}k" if tokens < 1_000_000 else f"{tokens/1_000_000:.1f}M"
 
-    # The Revert section must reflect reality: if revert.sh was not generated
-    # (write_revert_script failed — see finalisation_errors in run.json), the
-    # report must say so instead of pointing at a script that does not exist.
+    # The Revert section must reflect reality: if write_revert_script failed
+    # (see finalisation_errors in run.json), the report must say so instead of
+    # pointing at the script. A recorded failure overrides the existence
+    # check: write_text can die mid-write leaving a truncated revert.sh, and
+    # run_revert() executes an existing script as-is without regenerating it.
     revert_sh = run_dir / "revert.sh"
-    if revert_sh.exists():
+    revert_failed = any("write_revert_script" in e
+                        for e in meta.get("finalisation_errors", []))
+    if revert_sh.exists() and not revert_failed:
         revert_md = f"""This run is fully revertible:
 
 ```
@@ -59,10 +63,15 @@ moonlight revert {rid}
 (or inspect/run `{revert_sh}`)"""
     else:
         errs = "; ".join(meta.get("finalisation_errors", [])) or "revert.sh was not generated"
+        partial_warning = (
+            f"\nA `revert.sh` exists at `{revert_sh}` but may be INCOMPLETE — do not run it."
+            if revert_sh.exists() else ""
+        )
         revert_md = (
             "⚠ **revert.sh could not be generated — this run is NOT one-command revertible.**\n"
             f"Failure: `{errs}`\n"
             f"Review the file actions listed above and undo manually if needed (run dir: `{run_dir}`)."
+            + partial_warning
         )
 
     body = f"""# Moonlighter — {meta.get('date_human', date)}  ({'dry run' if dry else 'full-auto'})

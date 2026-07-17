@@ -167,6 +167,11 @@ def test_revert_failure_is_visible_in_the_report_it_writes(harness, monkeypatch)
     report renders — the morning report must not claim a clean, fully
     revertible run while revert.sh is missing."""
     def boom(*a, **k):
+        # Simulate write_text dying mid-write: a truncated revert.sh exists.
+        # The report must treat the recorded failure as authoritative — an
+        # existing-but-partial script must not read as "fully revertible"
+        # (run_revert() executes an existing script as-is).
+        (harness.run_dir / "revert.sh").write_text("#!/bin/sh\n# trunc", encoding="utf-8")
         raise OSError("disk full")
     monkeypatch.setattr(runner.revertmod, "write_revert_script", boom)
     seen = {}
@@ -186,8 +191,10 @@ def test_revert_failure_is_visible_in_the_report_it_writes(harness, monkeypatch)
     assert reports, "the report itself must still be written"
     report_text = reports[0].read_text(encoding="utf-8")
     assert "NOT one-command revertible" in report_text, \
-        "the report must not claim revertibility without revert.sh"
+        "the report must not claim revertibility when write_revert_script failed"
     assert "fully revertible" not in report_text
+    assert "INCOMPLETE" in report_text, \
+        "an existing-but-partial revert.sh must carry a do-not-run warning"
     import json
     meta = json.loads((harness.run_dir / "run.json").read_text(encoding="utf-8"))
     assert meta["status"] == "finalisation-error"
