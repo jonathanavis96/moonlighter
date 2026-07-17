@@ -287,18 +287,18 @@ def cmd_gc(args):
             elif not any(p == t for p, _ in errors):
                 errors.append((t, "target still present after rmtree"))
         freed += removed_bytes
+        # If ANY revert-data target was actually removed, the run can no longer be fully
+        # reverted — mark it non-revertible even on a PARTIAL purge (one target gone, the
+        # other failed), so the report says so and `moonlight revert` refuses instead of
+        # running a revert.sh that would silently skip the now-missing records.
+        if removed_bytes > 0:
+            _mark_revert_purged(d, meta, meta_f)
         if errors:
             failed += 1
             for p, exc in errors[:3]:
                 print(f"  ! {d.name}: could not remove {p}: {exc}", file=sys.stderr)
-            # Partial/failed removal — do NOT claim success and do NOT mark the run
-            # non-revertible (some data may still be there).
             print(f"  partial {d.name}  freed {removed_bytes/1e9:.2f} GB (targets remain)")
             continue
-        # Full removal succeeded → the run can no longer be reverted; record that so the
-        # report says so and `moonlight revert` refuses instead of running a revert.sh that
-        # would silently skip the now-missing trash/snapshot data.
-        _mark_revert_purged(d, meta, meta_f)
         print(f"  purged {d.name}  freed {removed_bytes/1e9:.2f} GB  [{when:%Y-%m-%d}]")
         purged += 1
     verb = "would free" if args.dry_run else "freed"

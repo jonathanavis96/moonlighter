@@ -104,10 +104,13 @@ def test_run_revert_refuses_purged_run(monkeypatch, tmp_path, capsys):
     assert "no longer revertible" in capsys.readouterr().err
 
 
-def _drive_main(monkeypatch, tmp_path, cfg, env):
-    """Minimal runner.main() harness; returns the bucket _supervise was called with."""
+def _drive_main(monkeypatch, tmp_path, cfg, env, usage=None):
+    """Minimal runner.main() harness. Returns the dict _supervise was called with (empty if
+    the run refused before launch)."""
     for k, v in env.items():
         monkeypatch.setenv(k, v)
+    usage = usage or {"five_hour": {"utilization": 5}, "seven_day": {"utilization": 20},
+                      "seven_day_sonnet": {"utilization": 7}}
     run_dir = tmp_path / "run-1"
     run_dir.mkdir()
     monkeypatch.setattr(runner.cfgmod, "load", lambda: cfg)
@@ -120,9 +123,7 @@ def _drive_main(monkeypatch, tmp_path, cfg, env):
     monkeypatch.setattr(runner, "_capture", lambda: ">")
     monkeypatch.setattr(runner, "_session_transcripts", lambda started_ts: [])
     monkeypatch.setattr(runner, "_sum_tokens", lambda paths: 0)
-    monkeypatch.setattr(runner.usage_api, "get_usage", lambda force=False: {
-        "five_hour": {"utilization": 5}, "seven_day": {"utilization": 20},
-        "seven_day_sonnet": {"utilization": 7}})
+    monkeypatch.setattr(runner.usage_api, "get_usage", lambda force=False: usage)
     monkeypatch.setattr(runner.revertmod, "write_revert_script", lambda rd: None)
     monkeypatch.setattr(runner.reportmod, "write_report", lambda cfg, rd, meta: None)
     monkeypatch.setattr(runner.time, "sleep", lambda seconds: None)
@@ -136,8 +137,8 @@ def _drive_main(monkeypatch, tmp_path, cfg, env):
     monkeypatch.setattr(runner, "_supervise", fake_supervise)
     monkeypatch.setattr(runner.subprocess, "run",
                         lambda *a, **k: types.SimpleNamespace(returncode=0, stdout=""))
-    runner.main()
-    return seen["bucket"]
+    seen["rc"] = runner.main()
+    return seen
 
 
 def _base_cfg(tmp_path):
@@ -147,13 +148,48 @@ def _base_cfg(tmp_path):
 
 
 def test_sonnet_night_model_uses_sonnet_bucket(monkeypatch, tmp_path):
-    bucket = _drive_main(monkeypatch, tmp_path, _base_cfg(tmp_path),
-                         {"ML_NIGHT_MODEL": "sonnet"})
-    assert bucket == "seven_day_sonnet"
+    seen = _drive_main(monkeypatch, tmp_path, _base_cfg(tmp_path), {"ML_NIGHT_MODEL": "sonnet"})
+    assert seen.get("bucket") == "seven_day_sonnet"
 
 
-def test_explicit_active_bucket_is_respected(monkeypatch, tmp_path):
-    # An explicit ML_ACTIVE_BUCKET (as the gate sets) must win over the model-derived default.
-    bucket = _drive_main(monkeypatch, tmp_path, _base_cfg(tmp_path),
-                         {"ML_NIGHT_MODEL": "sonnet", "ML_ACTIVE_BUCKET": "seven_day"})
-    assert bucket == "seven_day"
+def test_sonnet_model_overrides_explicit_non_sonnet_bucket(monkeypatch, tmp_path):
+    # The model is authoritative: a Sonnet run must draw the Sonnet pool even if a launcher
+    # exported ML_ACTIVE_BUCKET=seven_day from cfg before seeing the ML_NIGHT_MODEL override.
+    seen = _drive_main(monkeypatch, tmp_path, _base_cfg(tmp_path),
+                       {"ML_NIGHT_MODEL": "sonnet", "ML_ACTIVE_BUCKET": "seven_day"})
+    assert seen.get("bucket") == "seven_day_sonnet"
+
+
+def test_non_sonnet_model_uses_general_bucket(monkeypatch, tmp_path):
+    seen = _drive_main(monkeypatch, tmp_path, _base_cfg(tmp_path), {"ML_NIGHT_MODEL": "opus"})
+    assert seen.get("bucket") == "seven_day"
+
+
+def test_refuses_launch_when_weekly_cap_already_exhausted(monkeypatch, tmp_path):
+    # ML_RESERVE=50 → cap 50; seven_day already at 60 → refuse before launching, don't supervise.
+    seen = _drive_main(monkeypatch, tmp_path, _base_cfg(tmp_path), {"ML_RESERVE": "50"},
+                       usage={"five_hour": {"utilization": 5}, "seven_day": {"utilization": 60},
+                              "seven_day_sonnet": {"utilization": 7}})
+    assert "bucket" not in seen, "must not launch/supervise when already over the weekly cap"
+    assert seen["rc"] == 0
+
+
+def test_gc_partial_purge_marks_non_revertible(monkeypatch, tmp_path):
+    runs = tmp_path / "runs"
+    rd = _make_run(runs, "20260101-000000", finished=_old_iso(30))
+    monkeypatch.setattr(cli.state, "RUNS_DIR", runs)
+    real_rmtree = cli.shutil.rmtree
+
+    def flaky(path, *a, **k):
+        if pathlib.Path(path).name == "snapshot":
+            raise OSError("permission denied")
+        return real_rmtree(path, *a, **k)
+
+    monkeypatch.setattr(cli.shutil, "rmtree", flaky)
+    rc = cli.cmd_gc(types.SimpleNamespace(days=14, dry_run=False))
+    assert rc == 1                              # a target failed
+    assert not (rd / "trash").exists()          # one target really went
+    assert (rd / "snapshot").exists()           # the other remained
+    # Partial loss still means non-revertible — must be flagged, revert.sh gone.
+    assert json.loads((rd / "run.json").read_text()).get("revert_purged") is True
+    assert not (rd / "revert.sh").exists()

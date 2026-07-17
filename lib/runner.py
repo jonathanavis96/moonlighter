@@ -576,12 +576,12 @@ def main():
     if wallclock_override is not None:
         wallclock_min = wallclock_override
     night_model = os.environ.get("ML_NIGHT_MODEL") or cfg.get("night_model", "default")
-    # Derive the quota bucket from the effective night model when the caller didn't set one
-    # explicitly. Launched directly (ML_NIGHT_MODEL=sonnet, no ML_ACTIVE_BUCKET), _read_budget_env
-    # defaults to seven_day, so a Sonnet run would be checked against the general weekly reserve
-    # and could run past the Sonnet reserve. Mirrors gate.active_bucket_name().
-    if "ML_ACTIVE_BUCKET" not in os.environ:
-        bucket = "seven_day_sonnet" if night_model == "sonnet" else "seven_day"
+    # The quota bucket must match the model actually launched: a Sonnet session draws the
+    # Sonnet weekly pool, anything else the general one. Derive it authoritatively from the
+    # EFFECTIVE night_model (which honours an ML_NIGHT_MODEL override) rather than trusting the
+    # ML_ACTIVE_BUCKET that a gate/launcher computed from cfg before it saw the override — an
+    # explicit seven_day must not mask a Sonnet run. Mirrors gate.active_bucket_name().
+    bucket = "seven_day_sonnet" if night_model == "sonnet" else "seven_day"
     five_target = float(cfg.get("five_hour_target_pct", 80))
     if five_target_override is not None:
         five_target = five_target_override
@@ -599,15 +599,28 @@ def main():
     seven0 = float((u0.get("seven_day") or {}).get("utilization") or 0.0)
     five0 = float((u0.get("five_hour") or {}).get("utilization") or 0.0)
 
-    rid, run_dir = state.new_run_dir()
-    started = datetime.datetime.now()
-    started_ts = started.timestamp()
-
+    # Determine whether this run will actually spend BEFORE the launch guard: applying
+    # approved items always acts, regardless of the config mode.
     mission_override = _read_mission_file_env()
     apply_file = os.environ.get("ML_APPLY_TASKS")
     apply_mode = bool(apply_file and pathlib.Path(apply_file).exists())
     if apply_mode:
         dry_run = False  # applying approved items always acts
+
+    # Refuse before launching if the weekly bucket is already at/over the effective cap. The
+    # in-run supervisor only checks this after BUDGET_CHECK_SEC (~5 min), so a run started with
+    # no room — e.g. an ML_RESERVE stricter than the launcher's preflight used — would spend
+    # quota the override said was unavailable. Dry runs don't spend, so they may still observe.
+    if not dry_run and u0 and util0 >= weekly_cap:
+        state.gate_log(f"runner: refusing to launch — {bucket} at {util0:.0f}% already "
+                       f"≥ weekly cap {weekly_cap:.0f}% (reserve {reserve:.0f}%)")
+        return 0
+
+    rid, run_dir = state.new_run_dir()
+    started = datetime.datetime.now()
+    started_ts = started.timestamp()
+
+    if apply_mode:
         tasks = [t for t in pathlib.Path(apply_file).read_text(encoding="utf-8").split("\n\x1e") if t.strip()]
         mission = build_apply_mission(cfg, run_dir, tasks)
     elif mission_override is not None:
