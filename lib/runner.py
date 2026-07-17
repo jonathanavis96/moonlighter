@@ -678,61 +678,90 @@ def main():
                               five_target, weekly_cap)
 
     # --- wrap up ---
+    # Everything up to the `finally` below is best-effort bookkeeping: a failed
+    # pane capture, transcript write, token accounting or calibration append
+    # must NEVER prevent finalisation — revert.sh and the run report are the
+    # user's only handles on what the run did, so they are ALWAYS generated.
     finished = datetime.datetime.now()
-    pane_final = _capture()
-    (run_dir / "transcript.txt").write_text(pane_final, encoding="utf-8")
-
+    util_delta = 0.0
+    tokens_spent = 0
     try:
-        u1 = usage_api.get_usage(force=True)
-    except Exception:
-        u1 = {}
-    util1 = float((u1.get(bucket) or {}).get("utilization") or util0)
-    seven1 = float((u1.get("seven_day") or {}).get("utilization") or seven0)
-    sonnet1 = float((u1.get("seven_day_sonnet") or {}).get("utilization") or sonnet0)
-    five1 = float((u1.get("five_hour") or {}).get("utilization") or five0)
-    session_tx = _session_transcripts(started_ts)
-    tokens_spent = _sum_tokens(session_tx)
+        pane_final = _capture()
+        (run_dir / "transcript.txt").write_text(pane_final, encoding="utf-8")
 
-    # let session settle, then kill
-    time.sleep(3)
-    subprocess.run(["tmux", "kill-session", "-t", TMUX],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            u1 = usage_api.get_usage(force=True)
+        except Exception:
+            u1 = {}
+        util1 = float((u1.get(bucket) or {}).get("utilization") or util0)
+        seven1 = float((u1.get("seven_day") or {}).get("utilization") or seven0)
+        sonnet1 = float((u1.get("seven_day_sonnet") or {}).get("utilization") or sonnet0)
+        five1 = float((u1.get("five_hour") or {}).get("utilization") or five0)
+        session_tx = _session_transcripts(started_ts)
+        tokens_spent = _sum_tokens(session_tx)
 
-    util_delta = max(util1 - util0, 0.0)
-    run_meta.update({
-        "status": "observed" if dry_run else "clean",
-        "finished": finished.isoformat(),
-        "duration_min": round((finished - started).total_seconds() / 60.0, 1),
-        "stop_reason": stop_reason,
-        "util_after": util1, "util_delta": round(util_delta, 2),
-        "five_after": five1, "five_delta": round(max(five1 - five0, 0.0), 2),
-        "seven_day_after": seven1, "seven_day_sonnet_after": sonnet1,
-        "tokens_spent": tokens_spent,
-        "spend_pct": round(util_delta, 2),
-        "tokens": tokens_spent,
-    })
+        # let session settle before the finally-block kill
+        time.sleep(3)
 
-    # headline from summary.md line 1
-    headline = "Dry run — proposed actions, touched nothing" if dry_run else "Run complete"
-    if summary_path.exists():
-        first = summary_path.read_text(encoding="utf-8").strip().splitlines()
-        if first:
-            headline = first[0].lstrip("# ").strip() or headline
-    run_meta["headline"] = headline
-    (run_dir / "run.json").write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
-
-    # calibration (only meaningful when something was actually spent)
-    if util_delta > 0 and tokens_spent > 0:
-        state.append_calibration({
-            "run": rid, "primary_bucket": bucket,
-            "tokens_spent": tokens_spent, "util_delta": util_delta,
-            "seven_day_before": seven0, "seven_day_after": seven1,
-            "seven_day_sonnet_before": sonnet0, "seven_day_sonnet_after": sonnet1,
+        util_delta = max(util1 - util0, 0.0)
+        run_meta.update({
+            "status": "observed" if dry_run else "clean",
+            "finished": finished.isoformat(),
+            "duration_min": round((finished - started).total_seconds() / 60.0, 1),
+            "stop_reason": stop_reason,
+            "util_after": util1, "util_delta": round(util_delta, 2),
+            "five_after": five1, "five_delta": round(max(five1 - five0, 0.0), 2),
+            "seven_day_after": seven1, "seven_day_sonnet_after": sonnet1,
+            "tokens_spent": tokens_spent,
+            "spend_pct": round(util_delta, 2),
+            "tokens": tokens_spent,
         })
 
-    # revert.sh + report + notify
-    revertmod.write_revert_script(run_dir)
-    reportmod.write_report(cfg, run_dir, run_meta)
+        # headline from summary.md line 1
+        headline = "Dry run — proposed actions, touched nothing" if dry_run else "Run complete"
+        if summary_path.exists():
+            first = summary_path.read_text(encoding="utf-8").strip().splitlines()
+            if first:
+                headline = first[0].lstrip("# ").strip() or headline
+        run_meta["headline"] = headline
+        (run_dir / "run.json").write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
+
+        # calibration (only meaningful when something was actually spent)
+        if util_delta > 0 and tokens_spent > 0:
+            state.append_calibration({
+                "run": rid, "primary_bucket": bucket,
+                "tokens_spent": tokens_spent, "util_delta": util_delta,
+                "seven_day_before": seven0, "seven_day_after": seven1,
+                "seven_day_sonnet_before": sonnet0, "seven_day_sonnet_after": sonnet1,
+            })
+    except Exception as exc:
+        state.gate_log(f"runner: wrap-up bookkeeping failed for {rid}: {exc!r} — finalising anyway")
+        run_meta.update({
+            "status": "wrapup-error",
+            "finished": finished.isoformat(),
+            "duration_min": round((finished - started).total_seconds() / 60.0, 1),
+            "stop_reason": stop_reason,
+            "wrapup_error": repr(exc),
+        })
+        try:
+            (run_dir / "run.json").write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+    finally:
+        # kill the session even when bookkeeping blew up
+        subprocess.run(["tmux", "kill-session", "-t", TMUX],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # revert.sh + report + notify — each attempted independently so a
+        # failure in one can never suppress the other
+        try:
+            revertmod.write_revert_script(run_dir)
+        except Exception as exc:
+            state.gate_log(f"runner: write_revert_script failed for {rid}: {exc!r}")
+        try:
+            reportmod.write_report(cfg, run_dir, run_meta)
+        except Exception as exc:
+            state.gate_log(f"runner: write_report failed for {rid}: {exc!r}")
+
     state.gate_log(f"runner: {rid} finished — {stop_reason}; spent {util_delta:.2f}% / {tokens_spent} tok")
     return 0
 
