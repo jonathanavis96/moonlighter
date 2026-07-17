@@ -188,6 +188,13 @@ def get_usage(force=False) -> dict:
             return _serve_cached(ts, data, now)
         if _mem["data"] is not None and (now - _mem["ts"]) < STALE_GRACE:
             return _serve_cached(_mem["ts"], _mem["data"], now)
+        # No cached value to serve does NOT license an attempt: falling
+        # through here would mean every caller retries during the backoff /
+        # Retry-After window (exactly the no-cache-yet case of the 429
+        # storm, e.g. a fresh install whose first request got 429). Honour
+        # the window; callers already handle "no usable value" per the
+        # docstring contract.
+        raise RuntimeError("usage API is in its backoff window and no cached value is available yet")
     try:
         _record_attempt()
         data = _fetch()
