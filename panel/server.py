@@ -318,11 +318,22 @@ def _build_panel_html(status: dict, cfg: dict) -> str:
     # are served from cache and can be up to 90 min old — visually identical to live data.
     # Say so, or a frozen gauge reads as current (the 2026-07-17 "stuck at 0%/28%" bug).
     usage_stale = bool(usage.get("stale"))
+    usage_missing = bool(usage.get("missing"))
     usage_as_of = _html_escape(str(usage.get("as_of") or "?"))
-    stale_note = (
-        f' · <b class="stale-badge" title="Usage API unreachable; showing the last good reading.">'
-        f'⚠ cached, as of {usage_as_of}</b>'
-    ) if usage_stale else ""
+    if usage_missing:
+        # No reading exists at all — a different failure from serving a cached
+        # one; "cached, as of ?" here would mislead troubleshooting.
+        stale_note = (
+            ' · <b class="stale-badge" title="Usage API unreachable and no cached reading exists yet.">'
+            '⚠ no usage data</b>'
+        )
+    elif usage_stale:
+        stale_note = (
+            f' · <b class="stale-badge" title="Usage API unreachable; showing the last good reading.">'
+            f'⚠ cached, as of {usage_as_of}</b>'
+        )
+    else:
+        stale_note = ""
 
     mode_text = _html_escape(str(status.get("mode", "")))
     night_text = _html_escape(str(status.get("night", "")))
@@ -573,7 +584,9 @@ function renderStatus(s) {{
   el('five-track-u').style.left = fiveMax + '%';
   // Staleness badge — mirrors the server-rendered one. Without this the badge would
   // vanish on the first auto-refresh and a cached gauge would look live again.
-  const staleNote = u.stale
+  const staleNote = u.missing
+    ? ' · <b class="stale-badge" title="Usage API unreachable and no cached reading exists yet.">⚠ no usage data</b>'
+    : u.stale
     ? ' · <b class="stale-badge" title="Usage API unreachable; showing the last good reading.">⚠ cached, as of ' + esc(u.as_of || '?') + '</b>'
     : '';
 
