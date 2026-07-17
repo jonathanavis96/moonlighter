@@ -759,6 +759,12 @@ def main():
         except Exception as exc:
             state.gate_log(f"runner: write_revert_script failed for {rid}: {exc!r}")
             finalisation_failures.append(f"write_revert_script: {exc!r}")
+        if finalisation_failures:
+            # The morning report renders from run_meta — annotate BEFORE
+            # writing it, or it claims a clean, fully-revertible run while
+            # revert.sh is missing.
+            run_meta["status"] = "finalisation-error"
+            run_meta["finalisation_errors"] = list(finalisation_failures)
         try:
             reportmod.write_report(cfg, run_dir, run_meta)
         except Exception as exc:

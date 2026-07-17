@@ -162,6 +162,32 @@ def test_report_failure_marks_run_failed_and_returns_nonzero(harness, monkeypatc
     assert any("finalisation errors" in m for m in harness.logs)
 
 
+def test_revert_failure_is_visible_in_the_report_it_writes(harness, monkeypatch):
+    """write_revert_script() failing must be annotated in run_meta BEFORE the
+    report renders — the morning report must not claim a clean, fully
+    revertible run while revert.sh is missing."""
+    def boom(*a, **k):
+        raise OSError("disk full")
+    monkeypatch.setattr(runner.revertmod, "write_revert_script", boom)
+    seen = {}
+    real_write_report = runner.reportmod.write_report
+    def spying_write_report(cfg, run_dir, meta):
+        seen["status_at_report_time"] = meta.get("status")
+        seen["errors_at_report_time"] = list(meta.get("finalisation_errors", []))
+        return real_write_report(cfg, run_dir, meta)
+    monkeypatch.setattr(runner.reportmod, "write_report", spying_write_report)
+
+    rc = runner.main()
+
+    assert rc != 0
+    assert seen["status_at_report_time"] == "finalisation-error"
+    assert any("write_revert_script" in e for e in seen["errors_at_report_time"])
+    assert harness.report_files(), "the report itself must still be written"
+    import json
+    meta = json.loads((harness.run_dir / "run.json").read_text(encoding="utf-8"))
+    assert meta["status"] == "finalisation-error"
+
+
 def test_transcript_write_failure_still_writes_revert_and_report(harness):
     """The transcript write raising (here: IsADirectoryError, because a
     directory squats on transcript.txt) must not skip revert.sh or the
