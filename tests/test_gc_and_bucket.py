@@ -122,6 +122,29 @@ def test_run_revert_refuses_purged_run(monkeypatch, tmp_path, capsys):
     assert "no longer revertible" in capsys.readouterr().err
 
 
+def test_revert_items_refuses_purged_run(monkeypatch, tmp_path):
+    # The panel's approve/undo flow calls revert_items() directly, bypassing run_revert.
+    # A purged run's per-item undo would skip the now-missing restore data and falsely
+    # report success — the guard must cover this path too.
+    runs = tmp_path / "runs"
+    rd = runs / "20260101-000000"
+    rd.mkdir(parents=True)
+    (rd / "run.json").write_text(json.dumps({"status": "clean", "revert_purged": True}))
+    (rd / "manifest.jsonl").write_text(
+        json.dumps({"op": "trash", "path": "/x", "trash": "/gone"}) + "\n")
+    monkeypatch.setattr(revert, "STATE_RUNS", runs)
+    touched = []
+    monkeypatch.setattr(revert, "_revert_one",
+                        lambda run_dir, rec: touched.append(rec) or (True, "ok"))
+
+    res = revert.revert_items("20260101-000000", [0])
+
+    assert res["ok"] is False
+    assert res["reverted"] == []
+    assert not touched, "must not attempt per-item revert for a purged run"
+    assert any("no longer revertible" in e for e in res["errors"])
+
+
 def _drive_main(monkeypatch, tmp_path, cfg, env, usage=None):
     """Minimal runner.main() harness. Returns the dict _supervise was called with (empty if
     the run refused before launch)."""

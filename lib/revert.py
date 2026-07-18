@@ -107,22 +107,34 @@ def write_revert_script(run_dir):
     return dest
 
 
+_PURGED_MSG = ("is no longer revertible: its revert data was purged by gc. "
+               "Nothing to restore.")
+
+
+def _is_purged(run_dir):
+    """True if gc removed this run's revert data (revert_purged in run.json).
+
+    A GC'd run has had its trash/snapshot data removed; reverting against missing
+    data would silently "succeed" while restoring nothing, so BOTH revert paths
+    (whole-run run_revert and the panel's per-item revert_items) must refuse.
+    """
+    meta_f = run_dir / "run.json"
+    if not meta_f.exists():
+        return False
+    try:
+        return bool(json.loads(meta_f.read_text()).get("revert_purged"))
+    except (OSError, ValueError):
+        return False
+
+
 def run_revert(run_id):
     run_dir = STATE_RUNS / run_id
     if not run_dir.exists():
         print(f"No such run: {run_id}", file=sys.stderr)
         return 1
-    # A GC'd run has had its trash/snapshot data removed; regenerating and running a script
-    # against missing data would silently "succeed" while restoring nothing. Refuse loudly.
-    meta_f = run_dir / "run.json"
-    if meta_f.exists():
-        try:
-            if json.loads(meta_f.read_text()).get("revert_purged"):
-                print(f"Run {run_id} is no longer revertible: its revert data was purged by "
-                      f"gc. Nothing to restore.", file=sys.stderr)
-                return 1
-        except (OSError, ValueError):
-            pass
+    if _is_purged(run_dir):
+        print(f"Run {run_id} {_PURGED_MSG}", file=sys.stderr)
+        return 1
     script = run_dir / "revert.sh"
     if not script.exists():
         script = write_revert_script(run_dir)
@@ -183,6 +195,10 @@ def _revert_one(run_dir, rec):
 def revert_items(run_id, indices):
     """Revert specific manifest entries (by 0-based index) of a run, newest-first."""
     run_dir = STATE_RUNS / run_id
+    if _is_purged(run_dir):
+        # The panel calls this directly; a purged run's items would skip missing
+        # restore data and report a false success. Refuse the whole request.
+        return {"ok": False, "reverted": [], "errors": [f"Run {run_id} {_PURGED_MSG}"]}
     recs = _read_manifest(run_dir)
     sel = sorted((i for i in indices if 0 <= i < len(recs)), reverse=True)
     done, errors = [], []
