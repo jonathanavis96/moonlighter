@@ -429,6 +429,15 @@ def _process_scheduled(cfg):
 
         abname = active_bucket_name(cfg)
         budget_cfg = dict(cfg)
+        # Honour a stricter ML_RESERVE the same way runner.main() does, so a task is not
+        # marked FIRED here only for run.sh to refuse it on the tighter cap and leave no run
+        # behind (the task would then silently disappear).
+        reserve_override = os.environ.get("ML_RESERVE")
+        if reserve_override:
+            try:
+                budget_cfg["weekly_reserve_pct"] = float(reserve_override)
+            except ValueError:
+                pass
         if task.get("five_target"):
             budget_cfg["five_hour_target_pct"] = task["five_target"]
         bud = budgetmod.compute(usage, budget_cfg, abname)
