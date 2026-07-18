@@ -38,6 +38,26 @@ def active_bucket_name(cfg):
     return "seven_day_sonnet" if "sonnet" in model.lower() else "seven_day"
 
 
+def _apply_reserve_override(cfg):
+    """Return a cfg COPY with a stricter ML_RESERVE applied, mirroring runner.main().
+
+    runner.main() refuses to launch when the weekly bucket is over the effective (possibly
+    ML_RESERVE-stricter) cap, so every launch-decision preflight — the scheduled-task check,
+    and compute_status() behind `moonlight start` / `/api/start` / the nightly gate — must
+    budget with the SAME reserve. Otherwise a launcher reports GO / spawns run.sh only for the
+    runner to exit without creating a run, repeating on each cron tick. Always a copy, so
+    callers can further mutate it without touching the shared cfg.
+    """
+    out = dict(cfg)
+    override = os.environ.get("ML_RESERVE")
+    if override:
+        try:
+            out["weekly_reserve_pct"] = float(override)
+        except ValueError:
+            pass
+    return out
+
+
 def resolve_window(cfg):
     w = cfg.get("window", "auto")
     if isinstance(w, list) and w:
@@ -246,7 +266,7 @@ def compute_status(cfg=None, manual_away_hours=None):
     # --- weekly budget ---
     bud = None
     if usage is not None:
-        bud = budgetmod.compute(usage, cfg, abname)
+        bud = budgetmod.compute(usage, _apply_reserve_override(cfg), abname)
         if bud["ok"]:
             checks.append({"ts": t, "name": "spare capacity", "verdict": "OK",
                            "why": f"fill 5h to {bud['five_target']:.0f}% (now {bud['five_now']:.0f}%) · "
@@ -428,16 +448,10 @@ def _process_scheduled(cfg):
             continue
 
         abname = active_bucket_name(cfg)
-        budget_cfg = dict(cfg)
         # Honour a stricter ML_RESERVE the same way runner.main() does, so a task is not
         # marked FIRED here only for run.sh to refuse it on the tighter cap and leave no run
         # behind (the task would then silently disappear).
-        reserve_override = os.environ.get("ML_RESERVE")
-        if reserve_override:
-            try:
-                budget_cfg["weekly_reserve_pct"] = float(reserve_override)
-            except ValueError:
-                pass
+        budget_cfg = _apply_reserve_override(cfg)
         if task.get("five_target"):
             budget_cfg["five_hour_target_pct"] = task["five_target"]
         bud = budgetmod.compute(usage, budget_cfg, abname)

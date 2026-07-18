@@ -81,6 +81,26 @@ def test_gc_purges_old_run_and_marks_non_revertible(monkeypatch, tmp_path):
     assert any("purged by gc" in e for e in meta.get("finalisation_errors", []))
 
 
+def test_gc_marks_purged_when_rmtree_partially_fails(monkeypatch, tmp_path):
+    # rmtree can delete some children and then raise (permission error / race), leaving the
+    # top-level dir present so removed_any stays False. Restore data is already partially
+    # gone, so the run must be marked non-revertible — not left advertised as revertible.
+    runs = tmp_path / "runs"
+    rd = _make_run(runs, "20260101-000000", finished=_old_iso(30))
+    monkeypatch.setattr(cli.state, "RUNS_DIR", runs)
+
+    def flaky_rmtree(path, *a, **k):
+        p = pathlib.Path(path)
+        for child in p.iterdir():
+            child.unlink()            # partial deletion of restore data
+        raise OSError("permission denied mid-purge")
+
+    monkeypatch.setattr(cli.shutil, "rmtree", flaky_rmtree)
+    cli.cmd_gc(types.SimpleNamespace(days=14, dry_run=False))
+    meta = json.loads((rd / "run.json").read_text())
+    assert meta.get("revert_purged") is True, "a partially-purged run must be non-revertible"
+
+
 def test_gc_zero_byte_purge_marks_non_revertible(monkeypatch, tmp_path):
     # An empty trashed/snapshot dir frees 0 bytes but is still a revert record — removing it
     # must still mark the run non-revertible (key on removal, not byte count).

@@ -41,6 +41,26 @@ def test_paused_false_when_kill_switch_absent(cfg):
     assert status["paused"] is False
 
 
+def test_spare_capacity_check_honours_ml_reserve(cfg, monkeypatch):
+    # compute_status is the shared preflight for moonlight start / /api/start / the nightly
+    # gate; it must budget with the same effective ML_RESERVE the runner enforces, or those
+    # launchers report GO and spawn run.sh only for the runner to refuse and create no run.
+    cfg["weekly_reserve_pct"] = 10          # config cap 90
+    cfg["night_model"] = "default"
+    monkeypatch.setattr(gatemod, "gather_usage", lambda: ({
+        "five_hour": {"utilization": 10},
+        "seven_day": {"utilization": 60},   # under config cap 90, over the ML_RESERVE=50 cap
+        "seven_day_sonnet": {"utilization": 20},
+    }, None))
+    monkeypatch.setenv("ML_RESERVE", "50")
+
+    status = gatemod.compute_status(cfg)
+
+    cap = next(c for c in status["gate"]["checks"] if c["name"] == "spare capacity")
+    assert cap["verdict"] == "FAIL"
+    assert "weekly reserve" in cap["why"]
+
+
 def test_paused_true_when_kill_switch_present(cfg):
     cfg["kill_switch_path"].parent.mkdir(parents=True, exist_ok=True)
     cfg["kill_switch_path"].write_text("2026-07-16T00:00:00", encoding="utf-8")
