@@ -239,6 +239,33 @@ def test_due_task_missed_when_custom_five_hour_cap_already_hit(env):
     assert "5h window" in updated["note"]
 
 
+def test_due_task_missed_when_ml_reserve_stricter_than_config(env, monkeypatch):
+    # A stricter ML_RESERVE than config means the runner will refuse before launching; the
+    # scheduled preflight must honour the same reserve, or the task is marked FIRED here and
+    # then silently vanishes when run.sh refuses. seven_day=60 is under the config cap (90)
+    # but over the ML_RESERVE=50 cap.
+    cfg, popen_calls = env
+    cfg["weekly_reserve_pct"] = 10
+    monkeypatch.setenv("ML_RESERVE", "50")
+    monkeypatch.setattr(gate, "gather_usage", lambda: ({
+        "five_hour": {"utilization": 10},
+        "seven_day": {"utilization": 60},
+        "seven_day_sonnet": {"utilization": 20},
+    }, None))
+
+    now = datetime.datetime.now().astimezone()
+    task = _task(now - datetime.timedelta(minutes=5))
+    schedule.save([task])
+
+    fired = gate._process_scheduled(cfg)
+
+    assert fired is False
+    assert popen_calls == [], "must not spawn run.sh that the runner will refuse on the stricter reserve"
+    updated = schedule.get(task["id"])
+    assert updated["status"] == schedule.STATUS_MISSED
+    assert "weekly reserve" in updated["note"]
+
+
 def test_due_task_missed_when_weekly_cap_already_hit(env, monkeypatch):
     cfg, popen_calls = env
     monkeypatch.setattr(gate, "gather_usage", lambda: ({

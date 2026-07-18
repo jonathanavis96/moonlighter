@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import webbrowser
@@ -186,6 +187,135 @@ def cmd_attach(args):
     os.execvp("tmux", ["tmux", "attach", "-t", TMUX])
 
 
+def _dir_bytes(path):
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            fp = os.path.join(root, f)
+            try:
+                if not os.path.islink(fp):
+                    total += os.path.getsize(fp)
+            except OSError:
+                pass
+    return total
+
+
+def _mark_revert_purged(run_dir, meta, meta_f):
+    """Record that GC removed a run's revert data, so nothing later treats it as revertible.
+    Deletes revert.sh (the report keys off its existence) and flags run.json; run_revert()
+    checks the flag and refuses. Best-effort: if run.json can't be rewritten, say so."""
+    (run_dir / "revert.sh").unlink(missing_ok=True)
+    meta["revert_purged"] = True
+    errs = list(meta.get("finalisation_errors") or [])
+    errs.append(f"revert data purged by gc on {datetime.date.today():%Y-%m-%d}; "
+                "run is no longer revertible")
+    meta["finalisation_errors"] = errs
+    try:
+        meta_f.write_text(json.dumps(meta, indent=2))
+    except OSError as e:
+        print(f"  ! {run_dir.name}: purged data but could not update run.json ({e})",
+              file=sys.stderr)
+
+
+def cmd_gc(args):
+    """Purge trash/ + snapshot/ for clean runs older than --days, keeping
+    manifest.jsonl + run.json for audit/revert-listing. This is what stops
+    ~/.moonlighter/runs from growing unbounded (each run keeps full revertible
+    copies of everything it touched forever otherwise)."""
+    days = args.days
+    if days < 0:
+        print("error: --days must be >= 0 (a negative value would put the cutoff in the "
+              "future and make every run eligible)", file=sys.stderr)
+        return 2
+    cutoff = datetime.datetime.now() - datetime.timedelta(days=days)
+    runs_dir = state.RUNS_DIR
+    if not runs_dir.exists():
+        print("No runs dir.")
+        return 0
+    freed = 0
+    purged = 0
+    kept = 0
+    failed = 0
+    for d in sorted(runs_dir.iterdir()):
+        if not d.is_dir() or d.name.startswith(("apply-", "MOCK")):
+            continue
+        meta_f = d / "run.json"
+        if not meta_f.exists():
+            continue
+        try:
+            meta = json.loads(meta_f.read_text())
+        except (OSError, ValueError) as e:
+            print(f"  kept {d.name}: unreadable run.json ({e})")
+            kept += 1
+            continue
+        if meta.get("status") != "clean":
+            kept += 1
+            continue
+        # Fail closed on a missing/malformed timestamp: the directory mtime is not the run's
+        # age (a later touch would reset it), and purging revert data whose real age is
+        # unknown is exactly what we must not do.
+        stamp = meta.get("finished") or meta.get("started") or ""
+        try:
+            when = datetime.datetime.fromisoformat(stamp)
+        except (TypeError, ValueError):
+            print(f"  kept {d.name}: missing or invalid run timestamp")
+            kept += 1
+            continue
+        if when > cutoff:
+            kept += 1
+            continue
+        existing = [t for t in (d / "trash", d / "snapshot") if t.exists()]
+        if not existing:
+            continue
+        run_bytes = sum(_dir_bytes(t) for t in existing)
+        if args.dry_run:
+            print(f"  would purge {d.name}  ({run_bytes/1e9:.2f} GB)  [{when:%Y-%m-%d}]")
+            freed += run_bytes
+            purged += 1
+            continue
+        # Actually delete, counting only what really goes and reporting anything that doesn't.
+        errors = []
+        removed_bytes = 0
+        purged_data = False
+        for t in existing:
+            tb = _dir_bytes(t)
+            try:
+                shutil.rmtree(t)
+            except OSError as exc:
+                errors.append((t, exc))
+                # rmtree can delete some children before raising, so an error means restore
+                # data MAY already be partially gone — treat it as content loss, not intact.
+                purged_data = True
+            if not t.exists():
+                removed_bytes += tb
+                purged_data = True
+            elif not any(p == t for p, _ in errors):
+                errors.append((t, "target still present after rmtree"))
+        freed += removed_bytes
+        # If ANY revert-data target was removed OR a purge partially destroyed one before
+        # failing, the run can no longer be fully reverted — mark it non-revertible even on a
+        # PARTIAL/errored purge or a ZERO-BYTE one (an empty trashed dir is still a revert
+        # record), so the report says so and `moonlight revert` refuses instead of running a
+        # revert.sh that would silently skip the now-missing records. Key on removal, not bytes.
+        if purged_data:
+            _mark_revert_purged(d, meta, meta_f)
+        if errors:
+            failed += 1
+            for p, exc in errors[:3]:
+                print(f"  ! {d.name}: could not remove {p}: {exc}", file=sys.stderr)
+            print(f"  partial {d.name}  freed {removed_bytes/1e9:.2f} GB (targets remain)")
+            continue
+        print(f"  purged {d.name}  freed {removed_bytes/1e9:.2f} GB  [{when:%Y-%m-%d}]")
+        purged += 1
+    verb = "would free" if args.dry_run else "freed"
+    tail = f", {failed} failed" if failed else ""
+    print(f"\n  {purged} run(s) {'eligible' if args.dry_run else 'purged'}, "
+          f"{kept} kept (not clean / newer than {days}d){tail} — {verb} {freed/1e9:.2f} GB.")
+    if args.dry_run:
+        print("  (dry run — re-run with --apply to actually purge)")
+    return 1 if failed else 0
+
+
 def build_parser():
     p = argparse.ArgumentParser(prog="moonlight", description="Moonlighter control")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -202,6 +332,12 @@ def build_parser():
     lp = sub.add_parser("log"); lp.add_argument("-n", type=int, default=40); lp.set_defaults(fn=cmd_log)
     sub.add_parser("ui").set_defaults(fn=cmd_ui)
     sub.add_parser("attach").set_defaults(fn=cmd_attach)
+    gp = sub.add_parser("gc", help="purge trash/+snapshot/ of clean runs older than --days (keeps manifest)")
+    gp.add_argument("--days", type=int, default=14, help="keep revert data for runs newer than this many days (default 14)")
+    gmx = gp.add_mutually_exclusive_group()
+    gmx.add_argument("--apply", dest="dry_run", action="store_false", help="actually purge (default is dry-run)")
+    gmx.add_argument("--dry-run", dest="dry_run", action="store_true", help="preview only (default)")
+    gp.set_defaults(fn=cmd_gc, dry_run=True)
     return p
 
 

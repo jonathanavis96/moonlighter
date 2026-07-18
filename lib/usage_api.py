@@ -28,6 +28,7 @@ utilization values are percentages (0–100).
 resets_at is an ISO-8601 UTC timestamp string.
 """
 
+import datetime
 import json
 import pathlib
 import time
@@ -76,12 +77,38 @@ def _record_attempt(retry_after=0.0):
         pass
 
 
-def _may_attempt(now):
-    """True if enough time has passed since the last attempt (and any server-set Retry-After)."""
+def _may_attempt(now, reset_at=None):
+    """True if enough time has passed since the last attempt to try the API again.
+
+    Normally honours whichever is longer: the anti-stampede floor or a server-set
+    Retry-After. Exception: when the cached five-hour window has already rolled over
+    (`reset_at` in the past) AND the backoff was armed BEFORE that reset, the backoff
+    is throttling a now-stale reading — only the short floor applies, so one re-fetch
+    can pick up the reset value. But once we have attempted AFTER the reset and been
+    told to back off again, that Retry-After describes the CURRENT window and is
+    honoured in full, so a failed reset-refetch cannot reopen the 429 storm.
+    """
     ts, retry_after = _last_attempt()
     if not ts:
         return True
-    return (now - ts) >= max(MIN_ATTEMPT_INTERVAL, retry_after)
+    stale_backoff = reset_at is not None and reset_at <= now and ts < reset_at
+    floor = MIN_ATTEMPT_INTERVAL if stale_backoff else max(MIN_ATTEMPT_INTERVAL, retry_after)
+    return (now - ts) >= floor
+
+
+def _five_hour_reset_epoch(data):
+    """Epoch of the cached five-hour window's reset time, or None if missing/unparseable.
+
+    A parse failure returns None (treated as 'no reset known'), so an unreadable
+    timestamp is never a licence to break the backoff and re-open a 429 storm.
+    """
+    try:
+        stamp = (data or {}).get("five_hour", {}).get("resets_at")
+        if not stamp:
+            return None
+        return datetime.datetime.fromisoformat(stamp).timestamp()
+    except Exception:
+        return None
 
 
 def _read_token() -> str:
@@ -130,6 +157,18 @@ def _load_last_good():
         return obj.get("ts", 0), obj.get("data")
     except Exception:
         return 0, None
+
+
+def last_known():
+    """
+    (ts, data) of the last good reading on disk, of ANY age — for DISPLAY only.
+
+    get_usage() deliberately goes to None once the reading is older than STALE_GRACE so a
+    stale number can never drive a gate launch. The panel, though, should keep showing the
+    last reading (dated) rather than going blank when the API is down for a long spell.
+    Returns (0.0, None) when there is no cached reading at all. NEVER use this for a decision.
+    """
+    return _load_last_good()
 
 
 def last_serve_info() -> dict:
@@ -183,7 +222,14 @@ def get_usage(force=False) -> dict:
     # Backoff gate: if we attempted too recently (or the server set Retry-After), do NOT
     # attempt again — serve the stale value instead. Without this, a stale cache means every
     # caller retries on every call, which is how the 429 storm sustains itself.
-    if not _may_attempt(now):
+    # Exception: once the cached five-hour window has reset, the cached utilization is
+    # definitively wrong, so a backoff armed before that reset must not keep serving a
+    # pre-reset reading across the boundary (which would wrongly hold/miss a scheduled run
+    # for up to an hour). A Retry-After from a *post*-reset attempt is still honoured.
+    reset_at = _five_hour_reset_epoch(data)
+    if reset_at is None:
+        reset_at = _five_hour_reset_epoch(_mem["data"])
+    if not _may_attempt(now, reset_at=reset_at):
         if data is not None and (now - ts) < STALE_GRACE:
             return _serve_cached(ts, data, now)
         if _mem["data"] is not None and (now - _mem["ts"]) < STALE_GRACE:
