@@ -30,9 +30,12 @@ def _now_hms():
 
 
 def active_bucket_name(cfg):
-    # Match ANY Sonnet model (bare "sonnet" keyword or an explicit Sonnet model id), since a
-    # Sonnet session draws the Sonnet weekly pool. Mirrors runner.py's bucket derivation.
-    return "seven_day_sonnet" if "sonnet" in (cfg.get("night_model") or "").lower() else "seven_day"
+    # Match ANY Sonnet model (bare "sonnet" keyword or an explicit Sonnet model id) from the
+    # EFFECTIVE model: an ML_NIGHT_MODEL override (cron / moonlight start / panel) wins over
+    # cfg, mirroring runner.main(), so the gate budgets against the same weekly pool the run
+    # will actually draw. A Sonnet session draws the Sonnet pool.
+    model = os.environ.get("ML_NIGHT_MODEL") or cfg.get("night_model") or ""
+    return "seven_day_sonnet" if "sonnet" in model.lower() else "seven_day"
 
 
 def resolve_window(cfg):

@@ -612,8 +612,9 @@ def main():
     # Refuse before launching if the weekly bucket is already at/over the effective cap. The
     # in-run supervisor only checks this after BUDGET_CHECK_SEC (~5 min), so a run started with
     # no room — e.g. an ML_RESERVE stricter than the launcher's preflight used — would spend
-    # quota the override said was unavailable. Dry runs don't spend, so they may still observe.
-    if not dry_run and u0 and util0 >= weekly_cap:
+    # quota the override said was unavailable. Observe runs still start a real Claude survey
+    # session and spend quota, so the cap applies to EVERY launch, dry-run or not.
+    if u0 and util0 >= weekly_cap:
         state.gate_log(f"runner: refusing to launch — {bucket} at {util0:.0f}% already "
                        f"≥ weekly cap {weekly_cap:.0f}% (reserve {reserve:.0f}%)")
         return 0

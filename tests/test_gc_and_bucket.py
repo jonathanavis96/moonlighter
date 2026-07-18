@@ -223,6 +223,30 @@ def test_gate_active_bucket_name_matches_any_sonnet_model():
     assert gate.active_bucket_name({"night_model": "default"}) == "seven_day"
 
 
+def test_gate_active_bucket_name_honours_env_override(monkeypatch):
+    # The gate must derive the bucket from the EFFECTIVE model — an ML_NIGHT_MODEL override
+    # (cron / moonlight start / panel) that runner.main() acts on — not just cfg, or it
+    # budgets scheduled/manual runs against the wrong weekly pool.
+    import gate
+    monkeypatch.setenv("ML_NIGHT_MODEL", "sonnet")
+    assert gate.active_bucket_name({"night_model": "default"}) == "seven_day_sonnet"
+    monkeypatch.setenv("ML_NIGHT_MODEL", "claude-sonnet-4-5")
+    assert gate.active_bucket_name({"night_model": "default"}) == "seven_day_sonnet"
+    monkeypatch.delenv("ML_NIGHT_MODEL", raising=False)
+    assert gate.active_bucket_name({"night_model": "default"}) == "seven_day"
+
+
+def test_refuses_observe_launch_when_weekly_cap_exhausted(monkeypatch, tmp_path):
+    # Observe (dry-run) runs still start a real Claude survey session and spend quota, so the
+    # pre-launch cap guard must refuse them too when the weekly bucket is already over cap.
+    cfg = _base_cfg(tmp_path)
+    cfg["mode"] = "observe"
+    seen = _drive_main(monkeypatch, tmp_path, cfg, {},
+                       usage={"five_hour": {"utilization": 5}, "seven_day": {"utilization": 95},
+                              "seven_day_sonnet": {"utilization": 7}})
+    assert "bucket" not in seen, "observe runs spend quota; must refuse when over the weekly cap"
+
+
 def test_refuses_launch_when_weekly_cap_already_exhausted(monkeypatch, tmp_path):
     # ML_RESERVE=50 → cap 50; seven_day already at 60 → refuse before launching, don't supervise.
     seen = _drive_main(monkeypatch, tmp_path, _base_cfg(tmp_path), {"ML_RESERVE": "50"},
