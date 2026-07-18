@@ -28,6 +28,7 @@ utilization values are percentages (0–100).
 resets_at is an ISO-8601 UTC timestamp string.
 """
 
+import datetime
 import json
 import pathlib
 import time
@@ -76,12 +77,37 @@ def _record_attempt(retry_after=0.0):
         pass
 
 
-def _may_attempt(now):
-    """True if enough time has passed since the last attempt (and any server-set Retry-After)."""
+def _may_attempt(now, window_reset=False):
+    """True if enough time has passed since the last attempt to try the API again.
+
+    Normally honours whichever is longer: the anti-stampede floor or a server-set
+    Retry-After. But `window_reset=True` means the cached usage window has already
+    rolled over, so the cached utilization is known-stale — a long Retry-After must
+    not outlive the very window it was throttling. In that case only the short floor
+    applies, so one throttled re-fetch can pick up the fresh (reset) reading.
+    """
     ts, retry_after = _last_attempt()
     if not ts:
         return True
-    return (now - ts) >= max(MIN_ATTEMPT_INTERVAL, retry_after)
+    floor = MIN_ATTEMPT_INTERVAL if window_reset else max(MIN_ATTEMPT_INTERVAL, retry_after)
+    return (now - ts) >= floor
+
+
+def _five_hour_reset_passed(data, now):
+    """True if the cached five-hour window's reset time is at or before `now`.
+
+    A rolled window means the cached utilization no longer describes the current
+    window and must not be served across the boundary. Any missing/unparseable
+    timestamp returns False — an unreadable reset is never a licence to break the
+    backoff and re-open a 429 storm.
+    """
+    try:
+        stamp = (data or {}).get("five_hour", {}).get("resets_at")
+        if not stamp:
+            return False
+        return datetime.datetime.fromisoformat(stamp).timestamp() <= now
+    except Exception:
+        return False
 
 
 def _read_token() -> str:
@@ -195,7 +221,11 @@ def get_usage(force=False) -> dict:
     # Backoff gate: if we attempted too recently (or the server set Retry-After), do NOT
     # attempt again — serve the stale value instead. Without this, a stale cache means every
     # caller retries on every call, which is how the 429 storm sustains itself.
-    if not _may_attempt(now):
+    # Exception: once the cached five-hour window has reset, the cached utilization is
+    # definitively wrong, so a long Retry-After must not keep serving a pre-reset reading
+    # across the boundary (which would wrongly hold/miss a scheduled run for up to an hour).
+    window_reset = _five_hour_reset_passed(data, now) or _five_hour_reset_passed(_mem["data"], now)
+    if not _may_attempt(now, window_reset=window_reset):
         if data is not None and (now - ts) < STALE_GRACE:
             return _serve_cached(ts, data, now)
         if _mem["data"] is not None and (now - _mem["ts"]) < STALE_GRACE:
