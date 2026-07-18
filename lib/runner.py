@@ -580,8 +580,10 @@ def main():
     # Sonnet weekly pool, anything else the general one. Derive it authoritatively from the
     # EFFECTIVE night_model (which honours an ML_NIGHT_MODEL override) rather than trusting the
     # ML_ACTIVE_BUCKET that a gate/launcher computed from cfg before it saw the override — an
-    # explicit seven_day must not mask a Sonnet run. Mirrors gate.active_bucket_name().
-    bucket = "seven_day_sonnet" if night_model == "sonnet" else "seven_day"
+    # explicit seven_day must not mask a Sonnet run. Match ANY Sonnet model, not just the bare
+    # "sonnet" keyword: the arbitrary-model passthrough below can launch an explicit Sonnet
+    # model id, which still draws the Sonnet pool. Mirrors gate.active_bucket_name().
+    bucket = "seven_day_sonnet" if "sonnet" in (night_model or "").lower() else "seven_day"
     five_target = float(cfg.get("five_hour_target_pct", 80))
     if five_target_override is not None:
         five_target = five_target_override

@@ -30,7 +30,9 @@ def _now_hms():
 
 
 def active_bucket_name(cfg):
-    return "seven_day_sonnet" if cfg.get("night_model") == "sonnet" else "seven_day"
+    # Match ANY Sonnet model (bare "sonnet" keyword or an explicit Sonnet model id), since a
+    # Sonnet session draws the Sonnet weekly pool. Mirrors runner.py's bucket derivation.
+    return "seven_day_sonnet" if "sonnet" in (cfg.get("night_model") or "").lower() else "seven_day"
 
 
 def resolve_window(cfg):

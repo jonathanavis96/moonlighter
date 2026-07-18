@@ -23,7 +23,7 @@ def _iso(epoch):
 
 def test_backoff_with_no_cache_raises_instead_of_fetching(monkeypatch):
     monkeypatch.setattr(usage_api, "_load_last_good", lambda: (0.0, None))
-    monkeypatch.setattr(usage_api, "_may_attempt", lambda now, window_reset=False: False)
+    monkeypatch.setattr(usage_api, "_may_attempt", lambda now, reset_at=None: False)
     monkeypatch.setitem(usage_api._mem, "data", None)
     attempts = []
     monkeypatch.setattr(usage_api, "_fetch", lambda: attempts.append(1))
@@ -39,7 +39,7 @@ def test_backoff_with_cache_still_serves_stale(monkeypatch):
     now = time.time()
     monkeypatch.setattr(usage_api, "_load_last_good",
                         lambda: (now - usage_api.CACHE_TTL - 1, {"five_hour": {}}))
-    monkeypatch.setattr(usage_api, "_may_attempt", lambda now, window_reset=False: False)
+    monkeypatch.setattr(usage_api, "_may_attempt", lambda now, reset_at=None: False)
     monkeypatch.setitem(usage_api._mem, "data", None)
 
     assert usage_api.get_usage() == {"five_hour": {}}
@@ -80,14 +80,14 @@ def test_backoff_bypassed_once_cached_window_has_reset(monkeypatch):
 
 
 def test_reset_bypass_still_honours_min_interval(monkeypatch):
-    """Even after a reset, don't hammer: the short anti-stampede floor still applies."""
+    """Even a backoff armed before the reset only bypasses down to the anti-stampede floor."""
     import time
     now = time.time()
-    stale = {"five_hour": {"utilization": 100.0, "resets_at": _iso(now - 60)}}
+    stale = {"five_hour": {"utilization": 100.0, "resets_at": _iso(now - 3)}}
     monkeypatch.setattr(usage_api, "_load_last_good", lambda: (now - 120, stale))
     monkeypatch.setitem(usage_api._mem, "data", None)
     monkeypatch.setitem(usage_api._mem, "ts", 0.0)
-    # Last attempt only 5s ago (< MIN_ATTEMPT_INTERVAL) — reset or not, still throttled.
+    # Attempt was 5s ago and BEFORE the reset (reset 3s ago) — still throttled by the 30s floor.
     monkeypatch.setattr(usage_api, "_last_attempt", lambda: (now - 5, 3600.0))
     fetched = []
     monkeypatch.setattr(usage_api, "_fetch", lambda: fetched.append(1))
@@ -95,4 +95,28 @@ def test_reset_bypass_still_honours_min_interval(monkeypatch):
     out = usage_api.get_usage()
 
     assert not fetched, "reset bypass must still honour MIN_ATTEMPT_INTERVAL"
+    assert out == stale
+
+
+def test_reset_bypass_honours_retry_after_from_a_post_reset_attempt(monkeypatch):
+    """The reset bypass is not a licence to hammer forever.
+
+    Once we have already attempted AFTER the window reset and been told to back off
+    again (a fresh Retry-After describing the CURRENT window), that Retry-After is
+    honoured normally — otherwise a failed reset-refetch reopens the 429 storm.
+    """
+    import time
+    now = time.time()
+    stale = {"five_hour": {"utilization": 100.0, "resets_at": _iso(now - 300)}}
+    monkeypatch.setattr(usage_api, "_load_last_good", lambda: (now - 600, stale))
+    monkeypatch.setitem(usage_api._mem, "data", None)
+    monkeypatch.setitem(usage_api._mem, "ts", 0.0)
+    # Last attempt was 60s ago, AFTER the reset (300s ago), and got a fresh 1h Retry-After.
+    monkeypatch.setattr(usage_api, "_last_attempt", lambda: (now - 60, 3600.0))
+    fetched = []
+    monkeypatch.setattr(usage_api, "_fetch", lambda: fetched.append(1))
+
+    out = usage_api.get_usage()
+
+    assert not fetched, "a post-reset 429 must honour its Retry-After, not re-hammer every 30s"
     assert out == stale

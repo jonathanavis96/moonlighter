@@ -183,6 +183,23 @@ def test_non_sonnet_model_uses_general_bucket(monkeypatch, tmp_path):
     assert seen.get("bucket") == "seven_day"
 
 
+def test_explicit_sonnet_model_id_uses_sonnet_bucket(monkeypatch, tmp_path):
+    # The arbitrary-model passthrough can name an explicit Sonnet model (not the bare
+    # keyword "sonnet"); it still launches a Sonnet session, so it must draw the Sonnet
+    # weekly pool rather than being budgeted against the general seven_day bucket.
+    seen = _drive_main(monkeypatch, tmp_path, _base_cfg(tmp_path),
+                       {"ML_NIGHT_MODEL": "claude-sonnet-4-5-20250929"})
+    assert seen.get("bucket") == "seven_day_sonnet"
+
+
+def test_gate_active_bucket_name_matches_any_sonnet_model():
+    import gate
+    assert gate.active_bucket_name({"night_model": "sonnet"}) == "seven_day_sonnet"
+    assert gate.active_bucket_name({"night_model": "claude-sonnet-4-5"}) == "seven_day_sonnet"
+    assert gate.active_bucket_name({"night_model": "opus"}) == "seven_day"
+    assert gate.active_bucket_name({"night_model": "default"}) == "seven_day"
+
+
 def test_refuses_launch_when_weekly_cap_already_exhausted(monkeypatch, tmp_path):
     # ML_RESERVE=50 → cap 50; seven_day already at 60 → refuse before launching, don't supervise.
     seen = _drive_main(monkeypatch, tmp_path, _base_cfg(tmp_path), {"ML_RESERVE": "50"},
