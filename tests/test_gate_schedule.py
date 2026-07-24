@@ -129,10 +129,32 @@ def test_due_task_launches_with_correct_env_and_marked_fired(env):
     assert launch_env["ML_WALLCLOCK_MIN"] == "300"
     assert launch_env["ML_FIVE_TARGET"] == "80"
     assert launch_env["ML_ACTIVE_BUCKET"] == "seven_day"
+    assert launch_env["ML_WORK_ROOT"] == "/home/user/code/example"
 
     updated = schedule.get(task["id"])
     assert updated["status"] == schedule.STATUS_FIRED
     assert updated["fired_at"] is not None
+
+
+def test_folderless_task_is_missed_not_launched(env, monkeypatch):
+    """A legacy/corrupt due task with no folder has no validated Work root, so it
+    can never run safely: the gate marks it missed and never launches (rather than
+    firing a run runner.py would only refuse). An ambient ML_WORK_ROOT in the gate's
+    own environment must not rescue it into launching."""
+    cfg, popen_calls = env
+    monkeypatch.setenv("ML_WORK_ROOT", "/stale/inherited/root")
+
+    now = datetime.datetime.now().astimezone()
+    task = _task(now - datetime.timedelta(minutes=5), folder="")
+    schedule.save([task])
+
+    fired = gate._process_scheduled(cfg)
+
+    assert fired is False
+    assert popen_calls == []
+    updated = schedule.get(task["id"])
+    assert updated["status"] == schedule.STATUS_MISSED
+    assert "work root" in updated["note"]
 
 
 def test_due_task_passes_sonnet_active_bucket(env):

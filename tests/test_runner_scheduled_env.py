@@ -25,6 +25,9 @@ def test_scheduled_env_mission_and_caps_drive_runner_main(tmp_path, monkeypatch)
     monkeypatch.setenv("ML_MISSION_FILE", str(mission_file))
     monkeypatch.setenv("ML_WALLCLOCK_MIN", "17")
     monkeypatch.setenv("ML_FIVE_TARGET", "42")
+    # Real scheduled runs always carry the validated Work root (gate.py sets it from
+    # the task's resolved folder); runner.main() now refuses to launch without it.
+    monkeypatch.setenv("ML_WORK_ROOT", "/tmp/project")
 
     kill_switch = tmp_path / "pause"
     cfg = {
@@ -95,9 +98,10 @@ def test_scheduled_env_mission_and_caps_drive_runner_main(tmp_path, monkeypatch)
     assert "EVERY filesystem mutation MUST go through the helper" in mission
     assert "Nothing outward-facing, EVER" in mission
     assert "one-off scheduled task, not the broad nightly estate audit" in mission
-    assert "paths outside that validated" in mission
+    assert "Your validated Work root for this task is `/tmp/project`" in mission
+    assert "outside `/tmp/project` as audit-only" in mission
     assert "even if the user-authored brief explicitly names them" in mission
-    assert "must stay inside the validated Work root" in mission
+    assert "must stay inside `/tmp/project`" in mission
 
     [supervise_call] = supervise_calls
     assert supervise_call["five_target"] == 42
