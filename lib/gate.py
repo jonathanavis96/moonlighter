@@ -482,10 +482,15 @@ def _process_scheduled(cfg):
         # not just embedded as prose inside the mission text — so it can state the
         # concrete path in the brief and refuse to launch if it's ever missing. Left
         # unset (not "") when the task has no folder so runner.py's falsy check catches
-        # legacy/corrupt records the same way as an outright missing value.
+        # legacy/corrupt records the same way as an outright missing value — and since
+        # `env` is a copy of os.environ, an inherited/ambient ML_WORK_ROOT must be
+        # actively cleared for those records, or the runner would silently inherit a
+        # stale root instead of refusing.
         folder = (task.get("folder") or "").strip()
         if folder:
             env["ML_WORK_ROOT"] = folder
+        else:
+            env.pop("ML_WORK_ROOT", None)
         if task.get("wallclock_min"):
             env["ML_WALLCLOCK_MIN"] = str(task["wallclock_min"])
         if task.get("five_target"):

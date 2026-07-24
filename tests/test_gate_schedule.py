@@ -129,10 +129,30 @@ def test_due_task_launches_with_correct_env_and_marked_fired(env):
     assert launch_env["ML_WALLCLOCK_MIN"] == "300"
     assert launch_env["ML_FIVE_TARGET"] == "80"
     assert launch_env["ML_ACTIVE_BUCKET"] == "seven_day"
+    assert launch_env["ML_WORK_ROOT"] == "/home/user/code/example"
 
     updated = schedule.get(task["id"])
     assert updated["status"] == schedule.STATUS_FIRED
     assert updated["fired_at"] is not None
+
+
+def test_folderless_task_does_not_inherit_ambient_work_root(env, monkeypatch):
+    """A legacy/corrupt due task with no folder must not leak an ambient
+    ML_WORK_ROOT into the launch env — `env` is copied from os.environ, and
+    runner.py relies on ML_WORK_ROOT being absent to refuse such a launch."""
+    cfg, popen_calls = env
+    monkeypatch.setenv("ML_WORK_ROOT", "/stale/inherited/root")
+
+    now = datetime.datetime.now().astimezone()
+    task = _task(now - datetime.timedelta(minutes=5), folder="")
+    schedule.save([task])
+
+    fired = gate._process_scheduled(cfg)
+
+    assert fired is True
+    assert len(popen_calls) == 1
+    launch_env = popen_calls[0]["env"]
+    assert "ML_WORK_ROOT" not in launch_env
 
 
 def test_due_task_passes_sonnet_active_bucket(env):
