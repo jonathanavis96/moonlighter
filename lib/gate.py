@@ -463,6 +463,16 @@ def _process_scheduled(cfg):
             schedule.update(tid, status=schedule.STATUS_MISSED, note=note)
             continue
 
+        # A legacy/corrupt task with no validated Work root can never run safely: the
+        # panel requires and resolves a folder before queueing, so an empty one is a
+        # broken record. Mark it missed here rather than launching a run that runner.py
+        # would only refuse — which would otherwise leave a misleading FIRED status and
+        # burn the "one launch per tick" slot.
+        if not (task.get("folder") or "").strip():
+            schedule.update(tid, status=schedule.STATUS_MISSED,
+                            note="no validated work root (legacy/corrupt task)")
+            continue
+
         claimed = schedule.claim(tid)
         if claimed is None:
             continue
@@ -478,19 +488,12 @@ def _process_scheduled(cfg):
         env["ML_ACTIVE_BUCKET"] = abname
         # The validated Work root the task was created against (`_validate_schedule()`
         # in panel/server.py requires + resolves it before the task is ever queued).
-        # runner.py's build_scheduled_mission() needs this OUT OF BAND, structurally —
-        # not just embedded as prose inside the mission text — so it can state the
-        # concrete path in the brief and refuse to launch if it's ever missing. Left
-        # unset (not "") when the task has no folder so runner.py's falsy check catches
-        # legacy/corrupt records the same way as an outright missing value — and since
-        # `env` is a copy of os.environ, an inherited/ambient ML_WORK_ROOT must be
-        # actively cleared for those records, or the runner would silently inherit a
-        # stale root instead of refusing.
-        folder = (task.get("folder") or "").strip()
-        if folder:
-            env["ML_WORK_ROOT"] = folder
-        else:
-            env.pop("ML_WORK_ROOT", None)
+        # runner.py's build_scheduled_mission() needs it OUT OF BAND, structurally — not
+        # just as prose inside the mission text — so it can state the concrete path in
+        # the brief. Folderless (legacy/corrupt) tasks are marked missed above and never
+        # reach here, so this is always a real, non-empty path; runner.py's own falsy
+        # check stays as defence-in-depth.
+        env["ML_WORK_ROOT"] = (task.get("folder") or "").strip()
         if task.get("wallclock_min"):
             env["ML_WALLCLOCK_MIN"] = str(task["wallclock_min"])
         if task.get("five_target"):
