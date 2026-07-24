@@ -476,6 +476,16 @@ def _process_scheduled(cfg):
         env = dict(os.environ)
         env["ML_MISSION_FILE"] = str(mission_file)
         env["ML_ACTIVE_BUCKET"] = abname
+        # The validated Work root the task was created against (`_validate_schedule()`
+        # in panel/server.py requires + resolves it before the task is ever queued).
+        # runner.py's build_scheduled_mission() needs this OUT OF BAND, structurally —
+        # not just embedded as prose inside the mission text — so it can state the
+        # concrete path in the brief and refuse to launch if it's ever missing. Left
+        # unset (not "") when the task has no folder so runner.py's falsy check catches
+        # legacy/corrupt records the same way as an outright missing value.
+        folder = (task.get("folder") or "").strip()
+        if folder:
+            env["ML_WORK_ROOT"] = folder
         if task.get("wallclock_min"):
             env["ML_WALLCLOCK_MIN"] = str(task["wallclock_min"])
         if task.get("five_target"):

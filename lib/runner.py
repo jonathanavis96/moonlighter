@@ -289,9 +289,29 @@ Then stop and wait at the prompt. Do not start new work after writing the summar
 """
 
 
-def build_scheduled_mission(cfg, run_dir, scheduled_text, dry_run, five_now, five_target, weekly_now,
-                            weekly_cap, reserve, wallclock_min):
-    """Compose a one-off scheduled brief inside Moonlighter's normal safety rails."""
+def build_scheduled_mission(cfg, run_dir, scheduled_text, work_root, dry_run, five_now, five_target,
+                            weekly_now, weekly_cap, reserve, wallclock_min):
+    """Compose a one-off scheduled brief inside Moonlighter's normal safety rails.
+
+    `work_root` is the validated, resolved folder the task was created against
+    (`_validate_schedule()` in panel/server.py requires and resolves it before the
+    task is ever queued — it is the real source of truth, passed through by
+    `gate.py::_process_scheduled()` via `ML_WORK_ROOT`). The brief MUST state this
+    path explicitly: an earlier version only told the agent to "stay within the
+    validated Work root" without ever saying what that root WAS. An agent that
+    cannot independently verify an unstated root has no safe way to read that
+    instruction except as "don't act" — which is exactly what happened on the
+    2026-07-17 05:14 run: it downgraded its whole mission to audit-only rather
+    than guess. Fail loudly here instead of ever emitting that brief again.
+    """
+    work_root = str(work_root or "").strip()
+    if not work_root:
+        raise ValueError(
+            "build_scheduled_mission: no Work root resolved for this scheduled task — "
+            "refusing to generate a brief that references an unstated root (this is the "
+            "exact failure that caused the 2026-07-17 05:14 run to silently downgrade to "
+            "audit-only instead of acting)"
+        )
     off = cfg.get("off_limits_resolved", [])
     offl = "\n".join(f"  - {p}" for p in off)
     mlfs = HERE / "ml_fs.py"
@@ -324,6 +344,19 @@ below, while obeying every normal Moonlighter safety rule.
 ## SCHEDULED TASK — user-authored brief
 {scheduled_text.strip()}
 
+## Work root
+Your validated Work root for this task is `{work_root}`. This is the ONLY directory you may
+make filesystem changes in — it was resolved and checked against the user's configured work
+roots when the task was scheduled, so you do not need to (and cannot) independently re-verify
+it. Anything outside `{work_root}` is audit-only for this run, even if the brief above names it.
+
+## About this run's `run.json`
+`$ML_RUN_DIR/run.json` will show `"apply": false`. That field ONLY distinguishes this run from
+the separate "apply approved items" flow (where the user hand-ticks specific proposals from a
+prior night's report) — it says NOTHING about whether you may act now. Whether you may act is
+decided ENTIRELY by the MODE block above: a dry run stays DRY RUN and a full-auto run stays
+FULL-AUTO regardless of `apply`. Do NOT read `apply: false` as a blanket instruction to do nothing.
+
 ## Spare-capacity budget
 Stop cleanly when whichever of these ceilings is hit first:
 - the 5-hour window reaches ~{five_target:.0f}% (it is at {five_now:.0f}% right now), OR
@@ -337,9 +370,9 @@ Stop cleanly when whichever of these ceilings is hit first:
 ## HARD RULES (non-negotiable)
 - Nothing outward-facing, EVER: no git push, no deploys, no emails/messages, no calendar events,
   no publishing API calls, no installs that phone home. Unattended ⇒ no irreversible outward acts.
-- Stay within the scheduled task scope and selected Work root. Treat paths outside that validated
-  Work root as audit-only, even if the user-authored brief explicitly names them.
-- In full-auto, every local filesystem mutation must stay inside the validated Work root and must
+- Stay within the scheduled task scope and the Work root above (`{work_root}`). Treat paths
+  outside `{work_root}` as audit-only, even if the user-authored brief explicitly names them.
+- In full-auto, every local filesystem mutation must stay inside `{work_root}` and must
   go through the revertible helper above.
 - In observe mode, touch nothing outside this run dir even if the scheduled brief asks for changes.
 - No real deletes: "delete" means `ml_fs.py trash` (revertible). Snapshot before editing any file.
@@ -627,9 +660,22 @@ def main():
         tasks = [t for t in pathlib.Path(apply_file).read_text(encoding="utf-8").split("\n\x1e") if t.strip()]
         mission = build_apply_mission(cfg, run_dir, tasks)
     elif mission_override is not None:
-        mission = build_scheduled_mission(cfg, run_dir, mission_override, dry_run, five0,
-                                          five_target, util0, weekly_cap, reserve,
-                                          wallclock_min)
+        # ML_WORK_ROOT is set by gate.py::_process_scheduled() from the task's validated,
+        # resolved folder. build_scheduled_mission() itself refuses (ValueError) to build a
+        # brief with no stated root — but that exception alone would vanish silently, since
+        # run.sh is launched with stderr=DEVNULL. Log it to the gate log BEFORE bailing so
+        # the failure is actually visible, instead of ever launching a session whose brief
+        # references an unstated root (the 2026-07-17 05:14 audit-only downgrade).
+        work_root = os.environ.get("ML_WORK_ROOT", "").strip()
+        try:
+            mission = build_scheduled_mission(cfg, run_dir, mission_override, work_root, dry_run,
+                                              five0, five_target, util0, weekly_cap, reserve,
+                                              wallclock_min)
+        except ValueError as exc:
+            msg = f"runner: refusing to launch scheduled mission — {exc}"
+            state.gate_log(msg)
+            print(msg, file=sys.stderr)
+            return 1
     else:
         try:
             prior = digestmod.prior_brief()   # what earlier runs tonight already covered
