@@ -1,13 +1,13 @@
 """report.py — write the morning report for a run and fire notifications."""
 import datetime
 import json
-import os
 import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import notify as notifymod   # noqa: E402
+import atomic             # noqa: E402
 
 
 def _manifest_counts(run_dir):
@@ -101,7 +101,7 @@ moonlight revert {rid}
     fired = notifymod.report_ready(cfg, headline, report_path=dest, spend_line=spend_line)
     meta["report_path"] = str(dest)
     meta["notified"] = fired
-    (run_dir / "run.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    atomic.write_text(run_dir / "run.json", json.dumps(meta, indent=2))
     return dest
 
 

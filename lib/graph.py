@@ -47,13 +47,19 @@ def _this_week_samples(reset_iso):
             rec = json.loads(line)
         except Exception:
             continue
-        sd = rec.get("seven_day") or {}
-        if sd.get("resets_at") != reset_iso:
+        sd = rec.get("seven_day") if isinstance(rec, dict) else None
+        if not isinstance(sd, dict) or sd.get("resets_at") != reset_iso:
             continue
         t = _parse(rec.get("ts"))
         u = sd.get("utilization")
-        if t is not None and u is not None:
+        if t is None or u is None:
+            continue
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=datetime.timezone.utc)
+        try:
             out.append((t, float(u)))
+        except (TypeError, ValueError):
+            continue
     out.sort(key=lambda x: x[0])
     return out
 
@@ -122,8 +128,6 @@ def build(cfg, usage, budget):
 </svg>"""
 
     weekly_cap = float((budget or {}).get("weekly_cap") or target)
-    five_now = float((budget or {}).get("five_now") or 0)
-    five_target = float((budget or {}).get("five_target") or 80)
     basis = (f"based on your ~{len(weeks)}-week average (~{expected_scale:.0f}%)" if learned
              else f"a rough ~{expected_scale:.0f}% estimate until ~2 weeks of usage are logged, then it self-corrects")
     caption = (f"Solid = your actual use ({cur_util:.0f}% this week). Dashed = expected — shape from "

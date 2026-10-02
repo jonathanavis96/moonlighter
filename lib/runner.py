@@ -19,6 +19,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import config as cfgmod      # noqa: E402
 import state                 # noqa: E402
+import atomic             # noqa: E402
 import usage_api             # noqa: E402
 import revert as revertmod   # noqa: E402
 import report as reportmod   # noqa: E402
@@ -697,7 +698,7 @@ def main():
         "night_model": night_model, "manual": away_hours is not None,
         "apply": apply_mode,
     }
-    (run_dir / "run.json").write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
+    atomic.write_text(run_dir / "run.json", json.dumps(run_meta, indent=2))
     state.gate_log(f"runner: launching {rid} (dry_run={dry_run}, fill 5h to {five_target:.0f}%, "
                    f"weekly cap {weekly_cap:.0f}%)")
 
@@ -797,7 +798,7 @@ def main():
             if first:
                 headline = first[0].lstrip("# ").strip() or headline
         run_meta["headline"] = headline
-        (run_dir / "run.json").write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
+        atomic.write_text(run_dir / "run.json", json.dumps(run_meta, indent=2))
 
         # calibration (only meaningful when something was actually spent)
         if util_delta > 0 and tokens_spent > 0:
@@ -817,7 +818,7 @@ def main():
             "wrapup_error": repr(exc),
         })
         try:
-            (run_dir / "run.json").write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
+            atomic.write_text(run_dir / "run.json", json.dumps(run_meta, indent=2))
         except Exception:
             pass
     finally:
@@ -852,7 +853,7 @@ def main():
         run_meta["status"] = "finalisation-error"
         run_meta["finalisation_errors"] = finalisation_failures
         try:
-            (run_dir / "run.json").write_text(json.dumps(run_meta, indent=2), encoding="utf-8")
+            atomic.write_text(run_dir / "run.json", json.dumps(run_meta, indent=2))
         except Exception:
             pass
         state.gate_log(f"runner: {rid} finished with finalisation errors — "

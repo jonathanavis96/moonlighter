@@ -31,9 +31,13 @@ resets_at is an ISO-8601 UTC timestamp string.
 import datetime
 import json
 import pathlib
+import sys
 import time
 import urllib.request
 import urllib.error
+HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import atomic  # noqa: E402
 
 CREDENTIALS_PATH = pathlib.Path.home() / ".claude" / ".credentials.json"
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
@@ -72,7 +76,7 @@ def _last_attempt():
 def _record_attempt(retry_after=0.0):
     try:
         _ATTEMPT_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _ATTEMPT_FILE.write_text(json.dumps({"ts": time.time(), "retry_after": retry_after}))
+        atomic.write_text(_ATTEMPT_FILE, json.dumps({"ts": time.time(), "retry_after": retry_after}))
     except Exception:
         pass
 
@@ -146,7 +150,7 @@ def _fetch() -> dict:
 def _save_last_good(data):
     try:
         _LAST_GOOD.parent.mkdir(parents=True, exist_ok=True)
-        _LAST_GOOD.write_text(json.dumps({"ts": time.time(), "data": data}))
+        atomic.write_text(_LAST_GOOD, json.dumps({"ts": time.time(), "data": data}))
     except Exception:
         pass
 

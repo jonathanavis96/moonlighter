@@ -7,19 +7,23 @@ import pathlib
 import shutil
 import subprocess
 import sys
-import webbrowser
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import config as cfgmod   # noqa: E402
 import state              # noqa: E402
+import atomic             # noqa: E402
 import gate as gatemod    # noqa: E402
 import revert as revertmod  # noqa: E402
 
 PROJECT = HERE.parent
 TMUX = "moonlighter"
-GOLD = "\033[38;5;179m"; DIM = "\033[38;5;245m"; OK = "\033[38;5;108m"
-FAIL = "\033[38;5;174m"; HOLD = "\033[38;5;179m"; R = "\033[0m"
+GOLD = "\033[38;5;179m"
+DIM = "\033[38;5;245m"
+OK = "\033[38;5;108m"
+FAIL = "\033[38;5;174m"
+HOLD = "\033[38;5;179m"
+R = "\033[0m"
 
 
 def _c(verdict):
@@ -81,7 +85,7 @@ def cmd_start(args):
 
 
 def cmd_approve(args):
-    cfg = cfgmod.load()
+    cfgmod.load()
     runs = state.list_runs(50)
     did_dry = any(r.get("dry_run") for r in runs)
     if not did_dry and not args.force:
@@ -211,7 +215,7 @@ def _mark_revert_purged(run_dir, meta, meta_f):
                 "run is no longer revertible")
     meta["finalisation_errors"] = errs
     try:
-        meta_f.write_text(json.dumps(meta, indent=2))
+        atomic.write_text(meta_f, json.dumps(meta, indent=2))
     except OSError as e:
         print(f"  ! {run_dir.name}: purged data but could not update run.json ({e})",
               file=sys.stderr)
@@ -320,16 +324,24 @@ def build_parser():
     p = argparse.ArgumentParser(prog="moonlight", description="Moonlighter control")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("status").set_defaults(fn=cmd_status)
-    sp = sub.add_parser("start"); sp.add_argument("--hours", type=float, default=None)
-    sp.add_argument("--budget", type=float, default=None); sp.set_defaults(fn=cmd_start)
-    ap = sub.add_parser("approve"); ap.add_argument("--force", action="store_true")
+    sp = sub.add_parser("start")
+    sp.add_argument("--hours", type=float, default=None)
+    sp.add_argument("--budget", type=float, default=None)
+    sp.set_defaults(fn=cmd_start)
+    ap = sub.add_parser("approve")
+    ap.add_argument("--force", action="store_true")
     ap.set_defaults(fn=cmd_approve)
-    mp = sub.add_parser("mode"); mp.add_argument("mode", nargs="?", choices=["full-auto", "review", "observe"])
+    mp = sub.add_parser("mode")
+    mp.add_argument("mode", nargs="?", choices=["full-auto", "review", "observe"])
     mp.set_defaults(fn=cmd_mode)
-    rp = sub.add_parser("revert"); rp.add_argument("run_id"); rp.set_defaults(fn=cmd_revert)
+    rp = sub.add_parser("revert")
+    rp.add_argument("run_id")
+    rp.set_defaults(fn=cmd_revert)
     sub.add_parser("pause").set_defaults(fn=cmd_pause)
     sub.add_parser("resume").set_defaults(fn=cmd_resume)
-    lp = sub.add_parser("log"); lp.add_argument("-n", type=int, default=40); lp.set_defaults(fn=cmd_log)
+    lp = sub.add_parser("log")
+    lp.add_argument("-n", type=int, default=40)
+    lp.set_defaults(fn=cmd_log)
     sub.add_parser("ui").set_defaults(fn=cmd_ui)
     sub.add_parser("attach").set_defaults(fn=cmd_attach)
     gp = sub.add_parser("gc", help="purge trash/+snapshot/ of clean runs older than --days (keeps manifest)")
