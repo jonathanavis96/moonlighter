@@ -8,6 +8,10 @@ Two signals:
 import datetime
 import json
 import pathlib
+import sys
+HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import atomic  # noqa: E402
 
 PROJECTS_DIR = pathlib.Path.home() / ".claude" / "projects"
 HIST_CACHE = pathlib.Path.home() / ".moonlighter" / "histogram.json"
@@ -20,7 +24,7 @@ def _own_set():
     that 'the user' was active during its own runs."""
     if not OWN_TRANSCRIPTS.exists():
         return set()
-    return {l.strip() for l in OWN_TRANSCRIPTS.read_text().splitlines() if l.strip()}
+    return {ln.strip() for ln in OWN_TRANSCRIPTS.read_text().splitlines() if ln.strip()}
 
 
 # The night session runs in a dedicated cwd (~/.moonlighter/session), so all of
@@ -73,8 +77,8 @@ def _parse_timestamps(path, cutoff_dt):
                     obj = json.loads(line)
                 except Exception:
                     continue
-                ts = obj.get("timestamp")
-                if not ts:
+                ts = obj.get("timestamp") if isinstance(obj, dict) else None
+                if not isinstance(ts, str) or not ts:
                     continue
                 try:
                     dt = datetime.datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -123,7 +127,7 @@ def get_histogram(weeks=4):
     grid = build_histogram(weeks)
     try:
         HIST_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        HIST_CACHE.write_text(json.dumps(grid))
+        atomic.write_text(HIST_CACHE, json.dumps(grid))
     except Exception:
         pass
     return grid
@@ -161,7 +165,7 @@ def heatmap_normalized(grid=None):
     def q(p):
         return nz[min(len(nz) - 1, int(p * (len(nz) - 1)))]
 
-    t1, t2, t3 = q(0.35), q(0.70), q(0.90)
+    t1, t2 = q(0.35), q(0.70)
     out = []
     for dow in range(7):
         row = []

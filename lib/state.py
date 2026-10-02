@@ -2,6 +2,10 @@
 import datetime
 import json
 import pathlib
+import sys
+HERE = pathlib.Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import atomic  # noqa: E402
 
 STATE_DIR = pathlib.Path.home() / ".moonlighter"
 RUNS_DIR = STATE_DIR / "runs"
@@ -139,18 +143,25 @@ def weekly_end_pcts(bucket="seven_day"):
             rec = json.loads(line)
         except Exception:
             continue
-        b = rec.get(bucket) or {}
+        b = rec.get(bucket) if isinstance(rec, dict) else None
+        if not isinstance(b, dict):
+            continue
         util = b.get("utilization")
         resets = b.get("resets_at")
-        if util is None or not resets:
+        if util is None or not isinstance(resets, str) or not resets:
             continue
-        groups.setdefault(resets, []).append(float(util))
+        try:
+            groups.setdefault(resets, []).append(float(util))
+        except (TypeError, ValueError):
+            continue
     out = []
     for resets, vals in groups.items():
         try:
             r = datetime.datetime.fromisoformat(resets.replace("Z", "+00:00"))
         except ValueError:
             continue
+        if r.tzinfo is None:
+            r = r.replace(tzinfo=datetime.timezone.utc)
         if r < now_dt:  # completed week only
             out.append(max(vals))
     return sorted(out)
@@ -169,7 +180,7 @@ def own_transcripts():
     """Absolute paths of Moonlighter's own night-session transcripts (set)."""
     if not OWN_TRANSCRIPTS.exists():
         return set()
-    return {l.strip() for l in OWN_TRANSCRIPTS.read_text().splitlines() if l.strip()}
+    return {ln.strip() for ln in OWN_TRANSCRIPTS.read_text().splitlines() if ln.strip()}
 
 
 def add_own_transcripts(paths):
@@ -185,7 +196,7 @@ def add_own_transcripts(paths):
 
 def write_status_cache(status):
     ensure_dirs()
-    STATUS_CACHE.write_text(json.dumps(status, default=str), encoding="utf-8")
+    atomic.write_text(STATUS_CACHE, json.dumps(status, default=str))
 
 
 def read_status_cache():
