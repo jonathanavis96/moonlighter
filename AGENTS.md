@@ -148,6 +148,7 @@ for the user what you set up, the panel URL, the mode it's in, and how to reconf
 
 - **`tmux` not found** → install it; the engine requires it. (Native Windows → use WSL.)
 - **Panel won't load / port in use** → another process on 8377; change `ui_port` in `config.yaml`.
+- **Buttons answer "cross-origin request refused"** → the panel was opened through a public domain name. Open it by its IP address or its LAN or Tailscale name.
 - **Wizard's folder browser is empty / 403** → it's PIN-gated once configured; on first run it's
   open. After setup, the panel prompts for the PIN.
 - **No transcript / token count stuck at 0** → the session must be a *top-level* Claude session;

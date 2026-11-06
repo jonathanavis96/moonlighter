@@ -1,12 +1,19 @@
 """revert.py — build and run a byte-for-byte revert from a run's manifest."""
 import json
+import os
 import pathlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 
+import config as cfgmod
+
 STATE_RUNS = pathlib.Path.home() / ".moonlighter" / "runs"
+
+_CHMOD_NOTE = re.compile(r"Revert:\s*(chmod\b.*)$", re.S)
+_CHMOD_MODE = re.compile(r"[0-7]{3,4}|[ugoa]*[-+=][rwxXst]*(,[ugoa]*[-+=][rwxXst]*)*")
 
 
 def _read_manifest(run_dir):
@@ -49,6 +56,38 @@ def _read_manifest_with_torn(run_dir):
     return recs, torn
 
 
+def _chmod_note(text):
+    """A note's "Revert: chmod <mode> <path>...", as (argv, refused). A note is free
+    text an agent wrote, so it is parsed, never handed to a shell: one chmod, a plain
+    mode, absolute paths, none off-limits. (None, "") = no chmod in this note;
+    (None, why) = there is one, and it will not be run."""
+    m = _CHMOD_NOTE.search(str(text))
+    if not m:
+        return None, ""
+    cmd = m.group(1).strip()
+    try:
+        # punctuation_chars: `a;b` is three words, so a chained command is refused
+        # below for its `;` rather than read as an odd file name.
+        lexer = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        words = list(lexer)
+    except ValueError:   # an unbalanced quote
+        words = []
+    paths = [os.path.expanduser(w) for w in words[2:]]
+    if (len(words) < 3 or not _CHMOD_MODE.fullmatch(words[1])
+            or not all(os.path.isabs(p) for p in paths)):
+        return None, f"NOT replayed (not one plain chmod on absolute paths): {cmd}"
+    if any(cfgmod.is_off_limits(p) for p in paths):
+        return None, f"NOT replayed (off-limits): {cmd}"
+    return ["chmod", words[1], *paths], ""
+
+
+def _say(text):
+    """An echo of `text` as it is: a file name may hold $ ` " or $(...)."""
+    return "echo " + shlex.quote(text)
+
+
 def _snap_path(run_dir, abs_path):
     return run_dir / "snapshot" / str(pathlib.Path(abs_path)).lstrip("/")
 
@@ -62,7 +101,7 @@ def build_revert_script(run_dir):
         "# Restores snapshots, un-moves moves, un-trashes deletes, removes created files.",
         "# Git branches (moonlighter/*) are left for manual inspection.",
         "set -uo pipefail",
-        'echo "Reverting run ' + run_dir.name + '..."',
+        _say(f"Reverting run {run_dir.name}..."),
         "",
     ]
     if torn:
@@ -75,26 +114,28 @@ def build_revert_script(run_dir):
         op = rec.get("op")
         if op == "created":
             p = rec["path"]
-            lines.append(f'[ -e {shlex.quote(p)} ] && rm -f {shlex.quote(p)} && echo "  removed created {p}"')
+            lines.append(f'[ -e {shlex.quote(p)} ] && rm -f {shlex.quote(p)} && {_say("  removed created " + p)}')
         elif op == "move":
             src, dst = rec["src"], rec["dst"]
-            lines.append(f'if [ -e {shlex.quote(dst)} ]; then mkdir -p "$(dirname {shlex.quote(src)})"; mv -f {shlex.quote(dst)} {shlex.quote(src)} && echo "  un-moved -> {src}"; fi')
+            lines.append(f'if [ -e {shlex.quote(dst)} ]; then mkdir -p "$(dirname {shlex.quote(src)})"; mv -f {shlex.quote(dst)} {shlex.quote(src)} && {_say("  un-moved -> " + src)}; fi')
         elif op == "trash":
             p, tr = rec["path"], rec["trash"]
-            lines.append(f'if [ -e {shlex.quote(tr)} ]; then mkdir -p "$(dirname {shlex.quote(p)})"; mv -f {shlex.quote(tr)} {shlex.quote(p)} && echo "  un-trashed -> {p}"; fi')
+            lines.append(f'if [ -e {shlex.quote(tr)} ]; then mkdir -p "$(dirname {shlex.quote(p)})"; mv -f {shlex.quote(tr)} {shlex.quote(p)} && {_say("  un-trashed -> " + p)}; fi')
         elif op == "snapshot":
             p = rec["path"]
             snap = _snap_path(run_dir, p)
             # -P: never dereference; -p: preserve mode/times. Restores a
             # snapshotted symlink as a symlink, a regular file as its bytes.
-            lines.append(f'if [ -e {shlex.quote(str(snap))} ] || [ -L {shlex.quote(str(snap))} ]; then mkdir -p "$(dirname {shlex.quote(p)})"; cp -Pp {shlex.quote(str(snap))} {shlex.quote(p)} && echo "  restored {p}"; fi')
+            lines.append(f'if [ -e {shlex.quote(str(snap))} ] || [ -L {shlex.quote(str(snap))} ]; then mkdir -p "$(dirname {shlex.quote(p)})"; cp -Pp {shlex.quote(str(snap))} {shlex.quote(p)} && {_say("  restored " + p)}; fi')
         elif op == "note":
             # perm-fix notes carry an explicit "Revert: <cmd>" — honour it here
             # too, not only in the per-item panel path (_revert_one).
-            m = re.search(r"Revert:\s*(chmod\s+\S+\s+\S.*)$", rec.get("text", ""))
-            if m:
-                cmd = m.group(1)
-                lines.append(f'{cmd} && echo "  ran: {cmd}"')
+            argv, refused = _chmod_note(rec.get("text", ""))
+            if refused:
+                lines.append(_say("  " + refused) + " >&2")
+            elif argv:
+                cmd = shlex.join(argv)
+                lines.append(f'{cmd} && {_say("  ran: " + cmd)}')
     lines += ["", 'echo "Revert complete."', ""]
     return "\n".join(lines)
 
@@ -143,9 +184,6 @@ def run_revert(run_id):
 
 # --- per-item revert (for the night-digest tick-to-revert checklist) ---
 
-import os    # noqa: E402
-import shutil  # noqa: E402
-
 
 def _revert_one(run_dir, rec):
     """Reverse a single manifest record. Returns (ok, message)."""
@@ -182,10 +220,14 @@ def _revert_one(run_dir, rec):
             return True, f"restored {p}"
         if op == "note":
             # perm-fix notes carry an explicit "Revert: <cmd>" — honour it.
-            m = re.search(r"Revert:\s*(chmod\s+\S+\s+\S.*)$", rec.get("text", ""))
-            if m:
-                subprocess.call(["bash", "-c", m.group(1)])
-                return True, f"ran: {m.group(1)}"
+            argv, refused = _chmod_note(rec.get("text", ""))
+            if refused:
+                return False, refused
+            if argv:
+                cmd = shlex.join(argv)
+                if subprocess.call(argv) != 0:
+                    return False, f"failed: {cmd}"
+                return True, f"ran: {cmd}"
             return True, "note (nothing to revert)"
     except Exception as exc:
         return False, f"{op} failed: {exc}"

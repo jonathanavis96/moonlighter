@@ -53,7 +53,7 @@ checklist of bigger things it **proposes** — tick what you want, and it does e
 - **Your secrets are untouchable.** `~/.ssh`, `~/.aws`, GPG, credential stores and `.env` files
   are hard-blocked in code, no matter what you configure.
 - **It can't blow your budget.** You set a weekly reserve; it always stops short of it.
-- **PIN-gated.** Every action needs your PIN, even though the panel is only on your private network.
+- **PIN-gated.** Every action needs your PIN, even though the panel is only on your private network, and the panel refuses requests sent from any other website.
 
 ---
 

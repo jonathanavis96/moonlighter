@@ -92,12 +92,7 @@ def cmd_approve(args):
         print("No dry run has completed yet. Let the first observe-mode night run, review it,\n"
               "then `moonlight approve` (or `--force` to override).")
         return 1
-    # flip config mode -> full-auto
-    cfgpath = PROJECT / "config.yaml"
-    txt = cfgpath.read_text(encoding="utf-8")
-    txt = txt.replace("mode: observe", "mode: full-auto", 1)
-    cfgpath.write_text(txt, encoding="utf-8")
-    state.APPROVED_FLAG.write_text(state.now_iso(), encoding="utf-8")
+    set_mode("full-auto")
     print("\n  ✔ Full-auto approved. Moonlighter will now ACT on its nightly runs.")
     print("  Exits you have at all times:")
     print("    moonlight pause        — stop it running (kill switch)")
@@ -107,12 +102,9 @@ def cmd_approve(args):
 
 
 def set_mode(mode):
-    """Set operating mode in config.yaml. mode = 'full-auto' | 'observe'."""
-    cfgpath = PROJECT / "config.yaml"
-    txt = cfgpath.read_text(encoding="utf-8")
-    import re as _re
-    txt = _re.sub(r"^mode:\s*\S+", f"mode: {mode}", txt, count=1, flags=_re.M)
-    cfgpath.write_text(txt, encoding="utf-8")
+    """Set operating mode. mode = 'full-auto' | 'observe'. It goes in the overlay:
+    load() merges that over config.yaml, so a value written to the template loses."""
+    cfgmod.save_local({"mode": mode})
     if mode == "full-auto":
         state.APPROVED_FLAG.write_text(state.now_iso(), encoding="utf-8")
 

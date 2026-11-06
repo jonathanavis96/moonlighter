@@ -1,6 +1,6 @@
 """server.py — Moonlighter local control-panel web server.
 
-Stdlib only. Bind 127.0.0.1 only. PIN-gate all state changes.
+Stdlib only. Bind 127.0.0.1 only. PIN-gate all state changes; refuse cross-origin POSTs.
 
 Usage:
     python3 panel/server.py
@@ -8,6 +8,7 @@ Usage:
 import datetime
 import difflib
 import http.server
+import ipaddress
 import socketserver
 import json
 import os
@@ -15,7 +16,6 @@ import pathlib
 import re
 import subprocess
 import sys
-import textwrap
 import traceback
 import urllib.parse
 
@@ -36,6 +36,31 @@ import schedule as schedulemod  # noqa: E402
 
 DEVNULL = subprocess.DEVNULL
 TMUX = "moonlighter"
+
+# Names no public DNS serves. A public name can only be DNS rebinding, which makes
+# Origin and Host agree; the panel is reached by an address or a LAN/tailnet name.
+_PRIVATE_SUFFIXES = (".ts.net", ".local", ".lan", ".internal", ".home.arpa")
+
+
+def _private_name(host: str) -> bool:
+    if "." not in host or host.endswith(_PRIVATE_SUFFIXES):
+        return bool(host)
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+def _same_origin(origin: str, host: str) -> bool:
+    """Whether a request's Origin header is this panel's own page. Host is what the
+    browser dialled, so a phone over the LAN or a tailnet passes with no config."""
+    try:
+        parts = urllib.parse.urlsplit(origin)
+        name = parts.hostname or ""
+    except ValueError:   # malformed
+        return False
+    return bool(host) and parts.netloc.lower() == host.lower() and _private_name(name)
 
 
 # ---------------------------------------------------------------------------
@@ -337,13 +362,11 @@ def _build_panel_html(status: dict, cfg: dict) -> str:
 
     mode_text = _html_escape(str(status.get("mode", "")))
     night_text = _html_escape(str(status.get("night", "")))
-    is_live = status.get("live", False)
 
     # Whether any dry run has been recorded (for approve button state)
     runs_raw = state.list_runs(50)
     has_dry_run = any(r.get("dry_run") for r in runs_raw)
     approved = status.get("approved", False)
-    approve_disabled = "" if has_dry_run else " disabled"
 
     # JSON for the wiring script to reuse on refresh
     status_json = json.dumps(status, default=str)
@@ -847,9 +870,12 @@ document.addEventListener('DOMContentLoaded', () => {{
     const askb = el('ask-box'), inp = el('ask-input');
     const answer = (inp.value || '').trim();
     if (!answer) {{ inp.focus(); return; }}
+    const pin = pinPrompt();
+    if (!pin) return;
     try {{
-      await fetch('/api/answer', {{method:'POST', headers:{{'Content-Type':'application/json'}},
-        body: JSON.stringify({{run: askb.dataset.run, answer}})}});
+      const r = await fetch('/api/answer', {{method:'POST', headers:{{'Content-Type':'application/json'}},
+        body: JSON.stringify({{run: askb.dataset.run, answer, pin}})}});
+      if (!r.ok) {{ alert(r.status === 403 ? 'Wrong PIN: answer not sent.' : 'Send failed: HTTP ' + r.status); return; }}
       inp.value = ''; askb.style.display = 'none';
       el('run-feed') && (el('run-feed').innerHTML += '<div class="think">↳ you answered — continuing…</div>');
     }} catch(e) {{ alert('Send failed: ' + e); }}
@@ -1032,7 +1058,7 @@ document.addEventListener('DOMContentLoaded', () => {{
 
     # 13. Runs table — add id to tbody, replace demo rows
     old_thead = '<thead><tr><th>Night</th><th>What was done</th><th>Spend</th><th>Status</th><th></th></tr></thead>'
-    new_thead = f'<thead><tr><th>Night</th><th>What was done</th><th>Spend</th><th>Status</th><th></th></tr></thead>\n<tbody id="runs-tbody">'
+    new_thead = '<thead><tr><th>Night</th><th>What was done</th><th>Spend</th><th>Status</th><th></th></tr></thead>\n<tbody id="runs-tbody">'
     html = html.replace(old_thead, new_thead, 1)
 
     # Replace the demo rows (from first <tr> after thead to </table>)
@@ -1336,8 +1362,10 @@ def _build_run_html(run_id: str, cfg: dict) -> str:
     five_delta = meta.get("five_delta") or 0         # 5-hour %
     tok_h = _human_tokens(meta.get("tokens", 0))
     cost_parts = []
-    if five_delta: cost_parts.append(f"{five_delta}% of 5-hour")
-    if delta: cost_parts.append(f"{delta}% of weekly")
+    if five_delta:
+        cost_parts.append(f"{five_delta}% of 5-hour")
+    if delta:
+        cost_parts.append(f"{delta}% of weekly")
     cost_parts.append(f"{tok_h} tokens")
     run_cost = _html_escape(" · ".join(cost_parts))
     rid_esc = _html_escape(run_id)
@@ -1552,13 +1580,13 @@ def _build_manifest_ops(manifest: list, run_dir: pathlib.Path, distro: str) -> s
                 return f'<span class="diff-meta">{_html_escape(line)}</span>'
             return _html_escape(line)
 
-        colored = "\n".join(color_line(l) for l in diff)
+        colored = "\n".join(color_line(line) for line in diff)
         return f'<div class="diff-wrap"><pre>{colored}</pre></div>'
 
     blocks = []
     for rec in manifest:
         op = rec.get("op", "?")
-        block_lines = [f'<div class="op-block">']
+        block_lines = ['<div class="op-block">']
         block_lines.append(f'<div style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--dim);margin-bottom:8px">{_html_escape(op)}</div>')
 
         if op in ("snapshot", "write-begin"):
@@ -1727,8 +1755,8 @@ def _build_night_html(cfg: dict) -> str:
                 f'<span class="catn">{n_rev}</span></summary><div class="catwrap">{keepnote}{runs_block}</div></details>')
 
     # holistic overview
-    def stat(n, l):
-        return f'<div class="ovcell"><div class="ovn">{n}</div><div class="ovl">{l}</div></div>'
+    def stat(n, label):
+        return f'<div class="ovcell"><div class="ovn">{n}</div><div class="ovl">{label}</div></div>'
     overview = (
         '<div class="ovgrid">'
         + stat(d.get("run_count", 0), "runs")
@@ -2372,7 +2400,9 @@ def _validate_schedule(body: dict, cfg: dict) -> dict:
     work_roots = [pathlib.Path(r).resolve() for r in (cfg.get("work_roots_resolved") or [])]
     if work_roots and not any(folder_path == r or folder_path.is_relative_to(r) for r in work_roots):
         raise ValueError(f"folder is outside configured work roots: {folder}")
-    if cfgmod.is_off_limits(str(folder_path), cfg):
+    # contains=False: the folder is where the run works, not a move or trash source,
+    # so ~/code stays schedulable even though it holds ~/code/secrets.
+    if cfgmod.is_off_limits(str(folder_path), cfg, contains=False):
         raise ValueError(f"folder is off-limits: {folder}")
 
     docs_in = body.get("docs") or []
@@ -2597,6 +2627,14 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             self._send(404, "text/plain", b"404 Not Found")
 
     def do_POST(self):
+        # Any page its owner opens can make the browser POST here: a form or
+        # sendBeacon needs no CORS approval, and a text/plain body parses as JSON
+        # below. A browser's POST always carries Origin; with none it is a script,
+        # not a page, and the PIN gates still apply.
+        origin = self.headers.get("Origin")
+        if origin is not None and not _same_origin(origin, self.headers.get("Host", "")):
+            self._send_json(403, {"ok": False, "error": "cross-origin request refused"})
+            return
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         body = self._read_body()
@@ -2632,7 +2670,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
         try:
             html = _build_panel_html(status, CFG)
             self._send(200, "text/html; charset=utf-8", html.encode("utf-8"))
-        except Exception as exc:
+        except Exception:
             tb = traceback.format_exc()
             self._send(500, "text/plain", f"Panel build error:\n{tb}".encode("utf-8"))
 
@@ -2752,7 +2790,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
         try:
             html = _build_run_html(safe_id, CFG)
             self._send(200, "text/html; charset=utf-8", html.encode("utf-8"))
-        except Exception as exc:
+        except Exception:
             tb = traceback.format_exc()
             self._send(500, "text/plain", f"Run page error:\n{tb}".encode("utf-8"))
 
@@ -2868,11 +2906,10 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             weekly_reserve = float(body.get("weekly_reserve"))  # always leave this % weekly
             five_target = max(5.0, min(100.0, 100.0 - five_leave))
             weekly_reserve = max(0.0, min(90.0, weekly_reserve))
-            cfgpath = PROJECT / "config.yaml"
-            txt = cfgpath.read_text(encoding="utf-8")
-            txt = re.sub(r"^five_hour_target_pct:.*", f"five_hour_target_pct: {five_target:.0f}", txt, count=1, flags=re.M)
-            txt = re.sub(r"^weekly_reserve_pct:.*", f"weekly_reserve_pct: {weekly_reserve:.0f}", txt, count=1, flags=re.M)
-            cfgpath.write_text(txt, encoding="utf-8")
+            # The overlay: load() merges it over config.yaml, so the wizard's values
+            # would beat anything written to the template.
+            cfgmod.save_local({"five_hour_target_pct": round(five_target),
+                               "weekly_reserve_pct": round(weekly_reserve)})
             CFG["five_hour_target_pct"] = five_target
             CFG["weekly_reserve_pct"] = weekly_reserve
             self._send_json(200, {"ok": True, "five_target": five_target, "weekly_reserve": weekly_reserve})
@@ -2888,10 +2925,7 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
         want = body.get("mode")
         want = "observe" if want in ("review", "observe") else "full-auto"
         try:
-            cfgpath = PROJECT / "config.yaml"
-            txt = cfgpath.read_text(encoding="utf-8")
-            txt = re.sub(r"^mode:\s*\S+", f"mode: {want}", txt, count=1, flags=re.M)
-            cfgpath.write_text(txt, encoding="utf-8")
+            cfgmod.save_local({"mode": want})
             if want == "full-auto":
                 state.APPROVED_FLAG.write_text(state.now_iso(), encoding="utf-8")
             CFG["mode"] = want  # reflect immediately for this process
@@ -2912,11 +2946,9 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
             })
             return
         try:
-            cfgpath = PROJECT / "config.yaml"
-            txt = cfgpath.read_text(encoding="utf-8")
-            txt = txt.replace("mode: observe", "mode: full-auto", 1)
-            cfgpath.write_text(txt, encoding="utf-8")
+            cfgmod.save_local({"mode": "full-auto"})
             state.APPROVED_FLAG.write_text(state.now_iso(), encoding="utf-8")
+            CFG["mode"] = "full-auto"
             self._send_json(200, {"ok": True})
         except Exception as exc:
             self._send_json(500, {"ok": False, "error": str(exc)})
@@ -2990,8 +3022,11 @@ class PanelHandler(http.server.BaseHTTPRequestHandler):
                               "message": "; ".join(msgs) or "nothing applied"})
 
     def _handle_answer(self, body: dict):
-        # Answer the agent's clarifying question. No PIN: the run was already
-        # PIN-authorised via Apply; this just feeds text to a waiting agent.
+        # Answer the agent's clarifying question. PIN-gated: whatever lands here is
+        # read as an instruction by a running agent with write access.
+        if not self._check_pin(body):
+            self._send_json(403, {"ok": False, "error": "bad pin"})
+            return
         run_id = pathlib.Path(str(body.get("run", ""))).name
         answer = str(body.get("answer", "")).strip()
         rd = state.RUNS_DIR / run_id

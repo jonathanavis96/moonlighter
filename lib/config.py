@@ -4,7 +4,8 @@ Two layers: the documented, comment-rich template `config.yaml` (shipped default
 machine-written overlay `~/.moonlighter/config.local.yaml` that the first-run setup wizard
 owns. `load()` deep-merges the overlay OVER the template, so the wizard never has to rewrite
 (and strip the comments from) the template. Anything the wizard sets — budget, work folders,
-vault, devices, notifications, PIN, setup_complete — lives in the overlay.
+vault, devices, notifications, PIN, setup_complete — lives in the overlay, and so does
+every later change to the mode or the limits, from the panel or the CLI.
 """
 import os
 import pathlib
@@ -101,12 +102,16 @@ def save_local(updates):
     return merged
 
 
-def is_off_limits(path, cfg=None):
-    """True if `path` is inside any off-limits root."""
+def is_off_limits(path, cfg=None, contains=True):
+    """True if `path` is an off-limits root or inside one, or (with `contains`) if it
+    holds one: moving or trashing ~/.config carries ~/.config/gh along with it, into
+    the run trash, which gc later deletes. contains=False is for a destination or a
+    working folder: a file moved into ~/code, or a run scheduled in it, carries nothing
+    already there along with it."""
     cfg = cfg or load()
-    target = str(_expand(path))
-    for root in cfg["off_limits_resolved"]:
-        if target == root or target.startswith(root + os.sep):
+    target = _expand(path)
+    for root in map(pathlib.Path, cfg["off_limits_resolved"]):
+        if target.is_relative_to(root) or (contains and root.is_relative_to(target)):
             return True
     return False
 

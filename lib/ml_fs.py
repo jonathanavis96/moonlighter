@@ -73,8 +73,8 @@ def _snap_dest(rd, path):
     return dest
 
 
-def _guard(path):
-    if cfgmod.is_off_limits(path):
+def _guard(path, contains=True):
+    if cfgmod.is_off_limits(path, contains=contains):
         print(f"REFUSED: {path} is off-limits (secrets/credentials).", file=sys.stderr)
         sys.exit(3)
 
@@ -101,7 +101,7 @@ def do_snapshot(path):
 
 def do_move(src, dst):
     _guard(src)
-    _guard(dst)
+    _guard(dst, contains=False)
     p = _abspath(src)
     d = _abspath(dst)
     # Snapshot the source literally. shutil.move recreates a symlink as a
