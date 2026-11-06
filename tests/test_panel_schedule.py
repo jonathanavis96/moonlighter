@@ -83,6 +83,41 @@ def _past_iso(hours=2):
             - datetime.timedelta(hours=hours)).isoformat()
 
 
+def _schedule_folder(port, folder):
+    return _post(port, "/api/schedule", {
+        "prompt": "do the thing", "folder": str(folder), "run_at": _future_iso(),
+        "pin": TEST_PIN,
+    })
+
+
+def test_schedule_accepts_a_folder_that_holds_an_off_limits_root(running_panel):
+    """The folder is where a run works, not something moved or trashed, so holding
+    ~/code/secrets must not stop ~/code from being scheduled."""
+    port, work_dir = running_panel
+    panelserver.CFG["off_limits_resolved"] = [str(work_dir / "secrets")]
+
+    status, data = _schedule_folder(port, work_dir)
+
+    assert status == 200, data
+    assert data["ok"] is True
+    assert [t["folder"] for t in schedulemod.load()] == [str(work_dir)]
+
+
+def test_schedule_refuses_a_folder_inside_an_off_limits_root(running_panel):
+    port, work_dir = running_panel
+    root = work_dir / "secrets"
+    (root / "inner").mkdir(parents=True)
+    panelserver.CFG["off_limits_resolved"] = [str(root)]
+
+    for folder in (root, root / "inner"):
+        status, data = _schedule_folder(port, folder)
+
+        assert status == 400
+        assert data["ok"] is False
+        assert "off-limits" in data["error"]
+    assert schedulemod.load() == []
+
+
 def test_schedule_create_403s_without_pin(running_panel):
     port, work_dir = running_panel
 
